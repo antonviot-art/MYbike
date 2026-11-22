@@ -1,16 +1,18 @@
 ﻿import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Bike, Flag, House, Images, LockKeyhole, LogOut, Map, MessageSquare, UserRound } from 'lucide-react';
+import { Bike, Flag, House, Images, LockKeyhole, Map, MessageSquare, Radio, Settings, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { useCrew } from './context';
 import { frenchRegions } from './regions';
+import { Friends } from './friends';
 
 const tabs = [
   { to: '/', label: 'Accueil', icon: House },
   { to: '/discussion', label: 'Discussion', icon: MessageSquare },
+  { to: '/talkie', label: 'Talkie', icon: Radio },
   { to: '/vehicules', label: 'Véhicules', icon: Bike },
   { to: '/map', label: 'Carte', icon: Map },
   { to: '/medias', label: 'Médias', icon: Images },
@@ -25,6 +27,7 @@ export function CrewShell({ tab, children }: { tab: string; children: ReactNode 
   const [auth, setAuth] = useState(false);
   const [register, setRegister] = useState(false);
   const [notice, setNotice] = useState('');
+  const [settings, setSettings] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const region = user?.user_metadata['region'];
@@ -104,6 +107,10 @@ export function CrewShell({ tab, children }: { tab: string; children: ReactNode 
     try {
       const { error } = await supabase.auth.updateUser({ data: { given_name: value, region: selectedRegion, locality } });
       if (error) throw error;
+      if (settings) {
+        setSettings(false);
+        toast.success('Profil enregistré.');
+      }
     } catch {
       toast.error('Le profil n’a pas pu être enregistré. Réessaie.');
     } finally {
@@ -124,6 +131,7 @@ export function CrewShell({ tab, children }: { tab: string; children: ReactNode 
   function signOut() {
     void supabase.auth.signOut().then(({ error }) => {
       if (error) toast.error('La déconnexion a échoué. Réessayez.');
+      else setSettings(false);
     });
   }
 
@@ -138,10 +146,13 @@ export function CrewShell({ tab, children }: { tab: string; children: ReactNode 
           <div className="flex items-center gap-1 sm:gap-3">
             {!user && <span className="hidden text-xs text-muted-foreground md:inline">Version démo</span>}
             {user ? (
-              <Button variant="ghost" className="gap-2" onClick={signOut} aria-label="Se déconnecter" title="Se déconnecter">
-                {firstName && <Avatar pilot={firstName.charAt(0).toUpperCase()} />}
-                <LogOut />
-              </Button>
+              <>
+                <Friends key={user.id} />
+                <Button variant="ghost" className="gap-1 px-1 sm:px-2" onClick={() => setSettings(true)} aria-label="Réglages du compte" title="Réglages du compte">
+                  {firstName && <Avatar pilot={firstName.charAt(0).toUpperCase()} />}
+                  <Settings />
+                </Button>
+              </>
             ) : (
               <>
                 <Button className="px-2 sm:px-4" variant="ghost" onClick={() => selectAuthMode(false)}><UserRound className="hidden sm:block" /> Connexion</Button>
@@ -198,10 +209,10 @@ export function CrewShell({ tab, children }: { tab: string; children: ReactNode 
           {!register && <Button variant="ghost" onClick={resetPassword}>Mot de passe oublié ?</Button>}
         </DialogContent>
       </Dialog>
-      <Dialog open={needsProfile}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto" hideCloseButton onEscapeKeyDown={event => event.preventDefault()} onInteractOutside={event => event.preventDefault()}>
-          <DialogTitle className="font-display text-3xl">Ton profil MYbike</DialogTitle>
-          <DialogDescription>Ta région détermine la discussion locale qui t’est proposée.</DialogDescription>
+      <Dialog open={Boolean(user && (needsProfile || settings))} onOpenChange={setSettings}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto" hideCloseButton={needsProfile} onEscapeKeyDown={event => { if (needsProfile) event.preventDefault(); }} onInteractOutside={event => { if (needsProfile) event.preventDefault(); }}>
+          <DialogTitle className="font-display text-3xl">{settings ? 'Réglages du compte' : 'Ton profil MYbike'}</DialogTitle>
+          <DialogDescription>{settings ? user?.email : 'Ta région détermine la discussion locale qui t’est proposée.'}</DialogDescription>
           <form onSubmit={saveFirstName} className="grid gap-4">
             <label className="grid gap-2 text-sm">Prénom<input name="firstName" defaultValue={firstName} required maxLength={80} autoComplete="given-name" /></label>
             <label className="grid gap-2 text-sm">
@@ -213,7 +224,7 @@ export function CrewShell({ tab, children }: { tab: string; children: ReactNode 
             </label>
             <label className="grid gap-2 text-sm">
               Ville ou département (facultatif)
-              <input name="locality" maxLength={100} placeholder="Ex. Aube ou Haute-Marne" />
+              <input name="locality" maxLength={100} placeholder="Ex. Aube ou Haute-Marne" defaultValue={String(user?.user_metadata['locality'] ?? '')} />
             </label>
             <Button disabled={busy}>{busy ? 'Enregistrement…' : 'Enregistrer mon profil'}</Button>
           </form>

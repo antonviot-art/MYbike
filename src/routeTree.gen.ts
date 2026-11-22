@@ -14,6 +14,7 @@ import { Route as DiscussionRouteImport } from './routes/discussion'
 import { Route as MapRouteImport } from './routes/map'
 import { Route as MediasRouteImport } from './routes/medias'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as TalkieRouteImport } from './routes/talkie'
 import { Route as VehiculesRouteImport } from './routes/vehicules'
 
 const IndexRoute = IndexRouteImport.update({
@@ -41,6 +42,11 @@ const ResetPasswordRoute = ResetPasswordRouteImport.update({
   path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TalkieRoute = TalkieRouteImport.update({
+  id: '/talkie',
+  path: '/talkie',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const VehiculesRoute = VehiculesRouteImport.update({
   id: '/vehicules',
   path: '/vehicules',
@@ -53,6 +59,7 @@ export interface FileRoutesByFullPath {
   '/map': typeof MapRoute
   '/medias': typeof MediasRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/talkie': typeof TalkieRoute
   '/vehicules': typeof VehiculesRoute
 }
 export interface FileRoutesByTo {
@@ -61,6 +68,7 @@ export interface FileRoutesByTo {
   '/map': typeof MapRoute
   '/medias': typeof MediasRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/talkie': typeof TalkieRoute
   '/vehicules': typeof VehiculesRoute
 }
 export interface FileRoutesById {
@@ -70,15 +78,28 @@ export interface FileRoutesById {
   '/map': typeof MapRoute
   '/medias': typeof MediasRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/talkie': typeof TalkieRoute
   '/vehicules': typeof VehiculesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/discussion' | '/map' | '/medias' | '/reset-password' | '/vehicules'
+    | '/'
+    | '/discussion'
+    | '/map'
+    | '/medias'
+    | '/reset-password'
+    | '/talkie'
+    | '/vehicules'
   fileRoutesByTo: FileRoutesByTo
   to:
-    '/' | '/discussion' | '/map' | '/medias' | '/reset-password' | '/vehicules'
+    | '/'
+    | '/discussion'
+    | '/map'
+    | '/medias'
+    | '/reset-password'
+    | '/talkie'
+    | '/vehicules'
   id:
     | '__root__'
     | '/'
@@ -86,6 +107,7 @@ export interface FileRouteTypes {
     | '/map'
     | '/medias'
     | '/reset-password'
+    | '/talkie'
     | '/vehicules'
   fileRoutesById: FileRoutesById
 }
@@ -95,6 +117,7 @@ export interface RootRouteChildren {
   MapRoute: typeof MapRoute
   MediasRoute: typeof MediasRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  TalkieRoute: typeof TalkieRoute
   VehiculesRoute: typeof VehiculesRoute
 }
 
@@ -135,6 +158,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/talkie': {
+      id: '/talkie'
+      path: '/talkie'
+      fullPath: '/talkie'
+      preLoaderRoute: typeof TalkieRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/vehicules': {
       id: '/vehicules'
       path: '/vehicules'
@@ -151,6 +181,7 @@ const rootRouteChildren: RootRouteChildren = {
   MapRoute: MapRoute,
   MediasRoute: MediasRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  TalkieRoute: TalkieRoute,
   VehiculesRoute: VehiculesRoute,
 }
 export const routeTree = rootRouteImport

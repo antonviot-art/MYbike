@@ -173,7 +173,7 @@
 .page-title { font-family: var(--font-display); font-size: 42px; font-weight: 700; line-height: 1.1; }
 .app-main { padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
 .app-nav { position: fixed; inset: auto 0 0; z-index: 40; background: var(--secondary); border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom); }
-.app-nav-links { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); max-width: 640px; margin-inline: auto; }
+.app-nav-links { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); max-width: 640px; margin-inline: auto; }
 .nav-item { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; min-height: 64px; border-top: 2px solid transparent; color: var(--muted-foreground); font-size: clamp(11px, 2.5vw, 14px); font-weight: 600; }
 .nav-item:hover, .nav-item[data-status=active] { color: var(--foreground); background: var(--muted); }
 .nav-item[data-status=active] { border-top-color: var(--primary); }
@@ -249,18 +249,14 @@ input:focus, textarea:focus { outline: 1px solid var(--primary); }
 .home-hero img { object-fit: cover; object-position: center 52%; z-index: -2; }
 .home-hero::after { content: ''; z-index: -1; background: linear-gradient(12deg, var(--overlay) 12%, transparent 90%); }
 .home-hero h1 { font-size: clamp(2.4rem, 6.5vw, 4.5rem); max-width: 17ch; overflow-wrap: anywhere; }
-.weather-card, .home-shortcut, .ride-outlook { border: 1px solid var(--border); background: var(--secondary); border-radius: 22px; }
+.weather-card, .ride-outlook { border: 1px solid var(--border); background: var(--secondary); border-radius: 22px; }
 .weather-card { padding: clamp(18px, 3vw, 26px); }
 .ride-outlook { display: flex; align-items: center; gap: 12px; padding: 14px 18px; }
-.ride-outlook svg, .home-shortcut > svg:first-child { flex: none; color: var(--primary); }
-.weather-details, .home-shortcuts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 185px), 1fr)); gap: 10px; }
+.ride-outlook svg { flex: none; color: var(--primary); }
+.weather-details { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 185px), 1fr)); gap: 10px; }
 .weather-details > div { border-radius: 14px; padding: 12px; background: var(--card); }
 .weather-details dt { display: flex; align-items: center; gap: 6px; color: var(--muted-foreground); font-size: .875rem; }
 .weather-details dd { margin-top: 4px; font-weight: 700; }
-.home-shortcut { display: flex; align-items: center; gap: 12px; padding: 16px; }
-.home-shortcut:hover { background: var(--card); }
-.home-shortcut span { flex: 1; }
-.home-shortcut small { display: block; color: var(--muted-foreground); margin-top: 3px; line-height: 1.35; }
-.home-shortcut > svg:last-child { flex: none; }
 .chat-panel, .vehicle-grid article, .map-canvas { border-radius: 20px; }
 .media-photo { border-radius: 16px; }
+@media (max-width: 380px) { .nav-item { font-size: 10px; } }

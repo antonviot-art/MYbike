@@ -62,7 +62,7 @@ export function Friends() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild><Button variant="outline"><UserPlus /> Ajouter des amis</Button></DialogTrigger>
+      <DialogTrigger asChild><Button variant="outline" aria-label="Ajouter des amis" title="Ajouter des amis" className="px-2 sm:px-4"><UserPlus /><span className="hidden sm:inline">Amis</span></Button></DialogTrigger>
       <DialogContent className="max-h-[90dvh] overflow-y-auto">
         <DialogTitle>Mes amis</DialogTitle>
         <DialogDescription>Partage ton code ami ou saisis celui d’un autre membre.</DialogDescription>

@@ -10,7 +10,7 @@ import { socialCall, type SharedRoom } from './social';
 
 type Room = { id: string; label: string; code?: string };
 
-export function ChatPage() {
+export function ChatPage({ talkie = false }: { talkie?: boolean } = {}) {
   const { user, records, add, refresh } = useCrew();
   const [selected, setSelected] = useState('');
   const [shared, setShared] = useState<{ userId: string; rooms: SharedRoom[] }>();
@@ -88,15 +88,16 @@ export function ChatPage() {
   }
 
   return (
-    <CrewShell tab="Discussion">
-      {current ? <Conversation key={current.id} room={current} onBack={() => setSelected('')} /> : (
+    <CrewShell tab={talkie ? 'Talkie' : 'Discussion'}>
+      {current ? <Conversation key={current.id} room={current} talkie={talkie} onBack={() => setSelected('')} /> : (
         <div className="grid max-w-2xl gap-4">
+          {talkie && <p className="text-muted-foreground">Choisis une discussion pour envoyer ou écouter les vocaux du groupe.</p>}
           {rooms.map(room => (
             <Button key={room.id} variant="outline" onClick={() => setSelected(room.id)} className="h-14 justify-start px-4">
               {room.id === 'general' ? <MessageSquare /> : <MapPin />} {room.label}
             </Button>
           ))}
-          {(
+          {!talkie && (
             <section className="chat-panel grid gap-4 p-4">
               <h2 className="font-semibold">{user ? "Discussions par code" : "Groupes de démo"}</h2>
               {!user && <p className="text-sm text-muted-foreground">Les codes fonctionnent dans cette session de démo.</p>}
@@ -116,7 +117,7 @@ export function ChatPage() {
   );
 }
 
-function Conversation({ room, onBack }: { room: Room; onBack: () => void }) {
+function Conversation({ room, talkie, onBack }: { room: Room; talkie: boolean; onBack: () => void }) {
   const { records, add, name, upload, user } = useCrew();
   const [text, setText] = useState('');
   const [pollOpen, setPollOpen] = useState(false);
@@ -127,7 +128,7 @@ function Conversation({ room, onBack }: { room: Room; onBack: () => void }) {
   const feed = useRef<HTMLDivElement>(null);
   const voter = user?.id ?? 'demo';
   const entries = records.filter(record =>
-    (record.kind === 'message' || record.kind === 'poll') &&
+    (talkie ? record.kind === 'message' && typeof record.payload['audio'] === 'string' : record.kind === 'message' || record.kind === 'poll') &&
     (record.payload['room'] ?? 'general') === room.id);
 
   useEffect(() => {
@@ -236,7 +237,7 @@ function Conversation({ room, onBack }: { room: Room; onBack: () => void }) {
         </div>}
       </header>
       <div className="chat-feed" ref={feed}>
-        {!entries.length && <p className="text-muted-foreground">Aucun message pour le moment.</p>}
+        {!entries.length && <p className="text-muted-foreground">{talkie ? 'Aucun vocal pour le moment.' : 'Aucun message pour le moment.'}</p>}
         {entries.map(record => {
           if (record.kind === 'poll') {
             const options = record.payload['options'];
@@ -272,13 +273,18 @@ function Conversation({ room, onBack }: { room: Room; onBack: () => void }) {
         })}
       </div>
       <div className="border-t border-border p-3">
-        <form className="flex items-center gap-2" onSubmit={send}>
+        {talkie ? (
+          <Button type="button" className="h-12 w-full" disabled={micPending} onClick={recordVoice}>
+            {recording ? <Square /> : <Mic />}
+            {micPending ? 'Ouverture du micro…' : recording ? 'Arrêter et envoyer le vocal' : 'Enregistrer un vocal'}
+          </Button>
+        ) : <form className="flex items-center gap-2" onSubmit={send}>
           <input className="w-0 flex-1" aria-label="Ton message" placeholder="Écris un message…" value={text} onChange={event => setText(event.target.value)} />
           <Button type="button" variant="ghost" size="icon" aria-label={recording ? 'Envoyer le vocal' : 'Enregistrer un vocal'} disabled={micPending} onClick={recordVoice}>{recording ? <Square /> : <Mic />}</Button>
           <Button type="submit" size="icon" disabled={!text.trim()} aria-label="Envoyer le message"><Send /></Button>
-        </form>
+        </form>}
         {recording && <p role="status" className="mt-2 text-sm">Enregistrement en cours…</p>}
-        <Button type="button" variant="ghost" className="mt-2" aria-expanded={pollOpen} onClick={() => setPollOpen(!pollOpen)}><BarChart3 /> Sondage</Button>
+        {!talkie && <Button type="button" variant="ghost" className="mt-2" aria-expanded={pollOpen} onClick={() => setPollOpen(!pollOpen)}><BarChart3 /> Sondage</Button>}
         {pollOpen && (
           <form className="mt-2 grid gap-3" onSubmit={publishPoll}>
             <label className="grid gap-1">Question<input name="question" maxLength={160} required /></label>
