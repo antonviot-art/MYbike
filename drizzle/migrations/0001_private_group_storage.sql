@@ -1,0 +1,3 @@
+CREATE POLICY media_read ON storage.objects FOR SELECT TO authenticated USING (bucket_id = 'group-media');
+CREATE POLICY media_insert ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'group-media' AND (storage.foldername(name))[1] = auth.uid()::text);
+CREATE POLICY media_delete ON storage.objects FOR DELETE TO authenticated USING (bucket_id = 'group-media' AND (storage.foldername(name))[1] = auth.uid()::text);

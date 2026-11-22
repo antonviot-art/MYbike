@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1795369268184,
+      "tag": "0000_group_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795369318486,
+      "tag": "0001_private_group_storage",
+      "breakpoints": true
+    }
+  ]
+}
