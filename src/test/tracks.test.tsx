@@ -16,11 +16,35 @@ it('avoids displaying a speed from GPS drift and estimates sustained displacemen
     point: [latitude, 4.5], timestamp, accuracy: 9, reported: null,
   });
   expect(fix(1000, 48)).toBeUndefined();
-  expect(fix(3000, 48.00005)).toBeUndefined();
-  expect(fix(6000, 48.00005)).toBeUndefined();
-  const moving = fix(9000, 48.001);
-  expect(moving?.source).toBe('estimate');
-  expect(moving?.kmh).toBeCloseTo(50.04, 1);
+  expect(fix(3000, 48.00002)).toBeUndefined();
+  expect(fix(6000, 48.00004)).toBeUndefined();
+  const moving = fix(18000, 48.001);
+  expect(moving).toBeUndefined();
+  const steady = fix(24000, 48.00175);
+  expect(steady?.source).toBe('estimate');
+  expect(steady?.kmh).toBeCloseTo(50.04, 1);
+});
+
+it('ignores an isolated spike in the speed reported by the phone', () => {
+  const estimate = createRideSpeed();
+  const fix = { point: [48, 4.5] as [number, number], accuracy: 8 };
+  estimate({ ...fix, timestamp: 1000, reported: 10 });
+  expect(estimate({ ...fix, timestamp: 2000, reported: 48 })?.kmh).toBe(36);
+  expect(estimate({ ...fix, timestamp: 3000, reported: 10 })?.kmh).toBe(36);
+});
+
+it('uses the recent GPS trend even when one position drifts', () => {
+  const estimate = createRideSpeed();
+  let sample;
+  for (let second = 0; second <= 10; second++) {
+    sample = estimate({
+      point: [48 + second * 0.0001 + (second === 6 ? 0.002 : 0), 4.5],
+      timestamp: 1000 + second * 1000,
+      accuracy: 8,
+      reported: null,
+    });
+  }
+  expect(sample?.kmh).toBeCloseTo(40.03, 1);
 });
 
 it('keeps a GPS draft, rejects weak fixes and does not connect gaps in reception', () => {
