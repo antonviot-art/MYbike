@@ -31,7 +31,9 @@ export default function MapView({ points, segments, markers, focus, follow = fal
     map.current = instance;
     layer.current = L.layerGroup().addTo(instance);
     instance.on('click', event => callback.current(event.latlng.lat, event.latlng.lng));
-    return () => { instance.remove(); map.current = null; };
+    const resize = new ResizeObserver(() => instance.invalidateSize({ pan: false }));
+    resize.observe(el.current);
+    return () => { resize.disconnect(); instance.remove(); map.current = null; };
   }, []);
 
   useEffect(() => {

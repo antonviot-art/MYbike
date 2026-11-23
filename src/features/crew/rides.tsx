@@ -14,6 +14,8 @@ const MapView = lazy(() => import('./map-view'));
 const ignoreMapClick = () => {};
 const noPoints: TrackPoint[] = [];
 type Position = { point: TrackPoint; accuracy: number };
+type DashboardLayout = 'map' | 'balanced' | 'speed';
+const dashboardLayoutKey = 'mybike:dashboard-layout';
 
 export function TrackMap({ segments, position, stops = [], follow = false }: { segments: TrackPoint[][]; position?: Position | undefined; stops?: TrackStop[]; follow?: boolean }) {
   const markers = [
@@ -128,9 +130,22 @@ function RideRecorder() {
   const [saving, setSaving] = useState(false);
   const [discard, setDiscard] = useState(false);
   const [dashboard, setDashboard] = useState(false);
+  const [dashboardLayout, setDashboardLayout] = useState<DashboardLayout>('balanced');
   const [addingStop, setAddingStop] = useState(false);
   const canSave = draft.segments.some(segment => segment.length > 1);
   const rides = records.filter(record => record.kind === 'ride-track').slice().reverse();
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(dashboardLayoutKey);
+      if (saved === 'map' || saved === 'balanced' || saved === 'speed') setDashboardLayout(saved);
+    } catch { /* Keep the default layout. */ }
+  }, []);
+
+  function changeDashboardLayout(layout: DashboardLayout) {
+    setDashboardLayout(layout);
+    try { localStorage.setItem(dashboardLayoutKey, layout); } catch { /* The setting still applies to this session. */ }
+  }
 
   useEffect(() => {
     if (!dashboard) return;
@@ -169,9 +184,19 @@ function RideRecorder() {
   const duration = Math.floor(draft.duration / 60000) + ' min ' + (Math.floor(draft.duration / 1000) % 60) + ' s';
 
   return <div className="mx-auto grid max-w-5xl gap-6">
-    {dashboard && <section className="ride-dashboard" aria-label="Tableau de bord du parcours" onKeyDown={event => { if (event.key === 'Escape') setDashboard(false); }}>
+    {dashboard && <section className="ride-dashboard" data-layout={dashboardLayout} aria-label="Tableau de bord du parcours" onKeyDown={event => { if (event.key === 'Escape') setDashboard(false); }}>
       <div className="ride-dashboard-stats">
-        <Button size="icon" variant="outline" autoFocus aria-label="Fermer le tableau de bord" onClick={() => setDashboard(false)}><X /></Button>
+        <div className="flex w-full flex-wrap items-center justify-between gap-2">
+          <Button size="icon" variant="outline" autoFocus aria-label="Fermer le tableau de bord" onClick={() => setDashboard(false)}><X /></Button>
+          <label className="flex items-center gap-2 text-sm">
+            <span>Affichage</span>
+            <select aria-label="Répartition de l’écran" value={dashboardLayout} onChange={event => changeDashboardLayout(event.target.value as DashboardLayout)}>
+              <option value="map">Plus de carte</option>
+              <option value="balanced">Équilibré</option>
+              <option value="speed">Plus de compteur</option>
+            </select>
+          </label>
+        </div>
         {dial}
         <p>{kilometers(draft.distance)} · {duration}</p>
         {draft.recording && <Button onClick={() => { draft.stop(); setDashboard(false); }}><Square /> Arrêter</Button>}

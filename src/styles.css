@@ -303,18 +303,28 @@ input:focus, textarea:focus { outline: 1px solid var(--primary); }
   .vehicle-edit-actions { position: sticky; bottom: calc(77px + env(safe-area-inset-bottom)); z-index: 3; padding: 10px; border-radius: 12px; background: var(--secondary); box-shadow: 0 -4px 18px var(--overlay); }
 }
 .ride-speed > span:nth-child(2) { font-size: 2.8rem; line-height: 1; }
-.ride-dashboard { position: fixed; inset: 0; z-index: 45; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; background: var(--background); }
+.ride-dashboard { position: fixed; inset: 0; z-index: 45; display: grid; overflow: hidden; background: var(--background); }
 .ride-dashboard .track-map { height: 100%; min-height: 0; }
 .ride-dashboard .map-canvas { border-radius: 0; }
 .ride-dashboard-stats { display: grid; justify-items: center; gap: 10px; padding: max(14px, env(safe-area-inset-top)) 14px 14px; background: var(--secondary); }
-.ride-dashboard-stats > button:first-child { justify-self: start; }
 .ride-dashboard .ride-speed { background: transparent; }
-.ride-dashboard .ride-speed > span:nth-child(2) { font-size: clamp(4rem, 16vmin, 8rem); }
-@media (orientation: landscape) {
-  .ride-dashboard { grid-template: minmax(0, 1fr) / minmax(190px, 34%) minmax(0, 1fr); }
-  .ride-dashboard-stats { align-content: center; overflow-y: auto; }
-  .ride-dashboard .ride-speed > span:nth-child(2) { font-size: clamp(4rem, 11vw, 8rem); }
-}
 
 .vehicle-gallery .vehicle-photo { display: block; height: clamp(220px, 56vw, 500px); max-height: 500px; aspect-ratio: auto; object-fit: contain; background: var(--card); }
 .vehicle-gallery div.vehicle-photo { display: grid; }
+
+.ride-dashboard {
+  --dashboard-stats: 40%;
+  grid-template-rows: minmax(200px, var(--dashboard-stats)) minmax(0, 1fr);
+}
+.ride-dashboard[data-layout=map] { --dashboard-stats: 31%; }
+.ride-dashboard[data-layout=speed] { --dashboard-stats: 62%; }
+.ride-dashboard-stats { min-width: 0; min-height: 0; overflow-y: auto; align-content: center; container-type: inline-size; }
+.ride-dashboard-stats select { padding: 6px; }
+.ride-dashboard .ride-speed > span:nth-child(2) { font-size: clamp(3rem, 19cqw, 6rem); }
+.ride-dashboard[data-layout=map] .ride-speed > span:nth-child(2) { font-size: clamp(2.7rem, 16cqw, 4.25rem); }
+.ride-dashboard[data-layout=speed] .ride-speed > span:nth-child(2) { font-size: clamp(3.5rem, 28cqw, 9rem); }
+@media (orientation: landscape) {
+  .ride-dashboard { --dashboard-stats: 46%; grid-template: minmax(0, 1fr) / minmax(190px, var(--dashboard-stats)) minmax(0, 1fr); }
+  .ride-dashboard[data-layout=map] { --dashboard-stats: 29%; }
+  .ride-dashboard[data-layout=speed] { --dashboard-stats: 64%; }
+}
