@@ -272,7 +272,11 @@ function Conversation({ room, onBack }: { room: Room; onBack: () => void }) {
                 <Avatar pilot={message.pilot} userId={record.author_id} />
               </Link> : <Avatar pilot={message.pilot} />}
               <div className={`min-w-0 max-w-[80%] ${own ? 'text-right' : ''}`}>
-                <p className="mb-1 text-xs text-muted-foreground">{own ? 'Toi' : message.name} · {message.time}</p>
+                <p className="mb-1 text-xs text-muted-foreground">
+                  {record.author_id && !own
+                    ? <Link to="/pilotes/$pilotId" params={{ pilotId: record.author_id }} className="font-semibold text-foreground hover:underline">{message.name}</Link>
+                    : own ? 'Toi' : message.name} · {message.time}
+                </p>
                 <div className={`bubble max-w-full break-words text-left ${own ? 'bubble-own' : ''}`}>{message.audio ? <VoiceMessage path={message.audio} /> : message.text}</div>
               </div>
             </div>
