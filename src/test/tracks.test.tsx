@@ -1,6 +1,27 @@
 ﻿import { act, renderHook } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { useTrackRecorder } from '@/features/crew/use-track-recorder';
+import { createRideSpeed } from '@/features/crew/ride-speed';
+
+it('uses the device speed and shows zero immediately when it reports a stop', () => {
+  const estimate = createRideSpeed();
+  const fix = { point: [48, 4.5] as [number, number], accuracy: 9 };
+  expect(estimate({ ...fix, timestamp: 1000, reported: 10 })).toEqual({ kmh: 36, source: 'gps' });
+  expect(estimate({ ...fix, timestamp: 2000, reported: 0 })).toEqual({ kmh: 0, source: 'gps' });
+});
+
+it('avoids displaying a speed from GPS drift and estimates sustained displacement', () => {
+  const estimate = createRideSpeed();
+  const fix = (timestamp: number, latitude: number) => estimate({
+    point: [latitude, 4.5], timestamp, accuracy: 9, reported: null,
+  });
+  expect(fix(1000, 48)).toBeUndefined();
+  expect(fix(3000, 48.00005)).toBeUndefined();
+  expect(fix(6000, 48.00005)).toBeUndefined();
+  const moving = fix(9000, 48.001);
+  expect(moving?.source).toBe('estimate');
+  expect(moving?.kmh).toBeCloseTo(50.04, 1);
+});
 
 it('keeps a GPS draft, rejects weak fixes and does not connect gaps in reception', () => {
   let onPosition: PositionCallback = () => {};

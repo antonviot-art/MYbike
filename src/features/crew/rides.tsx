@@ -155,10 +155,13 @@ function RideRecorder() {
     } finally { setSaving(false); }
   }
 
-  const dial = <div className="ride-speed" aria-label="Vitesse GPS actuelle">
-    <Gauge size={24} aria-hidden="true" />
-    <span className="font-display font-bold tabular-nums">{draft.speed === undefined ? '—' : Math.round(draft.speed)}</span>
-    <span className="text-sm text-muted-foreground">km/h</span>
+  const dial = <div>
+    <div className="ride-speed" aria-label="Vitesse GPS actuelle">
+      <Gauge size={24} aria-hidden="true" />
+      <span className="font-display font-bold tabular-nums">{draft.speed === undefined ? '—' : Math.round(draft.speed)}</span>
+      <span className="text-sm text-muted-foreground">km/h</span>
+    </div>
+    <p className="px-2 text-sm text-muted-foreground">{draft.speedSource === 'gps' ? 'Mesurée par le GPS' : draft.speedSource === 'estimate' ? 'Estimée sur plusieurs positions' : 'Vitesse GPS indisponible'}</p>
   </div>;
   const duration = Math.floor(draft.duration / 60000) + ' min ' + (Math.floor(draft.duration / 1000) % 60) + ' s';
 

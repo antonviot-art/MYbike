@@ -1,6 +1,7 @@
 ﻿import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { metersBetween, readSegments, trackDistance, type TrackPoint } from './tracks';
+import { createRideSpeed, type SpeedReading } from './ride-speed';
 
 const maxPoints = 12000;
 
@@ -9,7 +10,7 @@ export function useTrackRecorder(key: string) {
   const [duration, setDuration] = useState(0);
   const [recording, setRecording] = useState(false);
   const [accuracy, setAccuracy] = useState<number>();
-  const [speed, setSpeed] = useState<number>();
+  const [speedReading, setSpeedReading] = useState<SpeedReading>();
   const [position, setPosition] = useState<{ point: TrackPoint; accuracy: number }>();
   const data = useRef<TrackPoint[][]>([]);
   const durationRef = useRef(0);
@@ -46,11 +47,14 @@ export function useTrackRecorder(key: string) {
     let segment: TrackPoint[] = [];
     let pointCount = data.current.reduce((total, line) => total + line.length, 0);
     let active = true;
+    let lastFix = -Infinity;
+    let speedTimeout: number | undefined;
+    const estimateSpeed = createRideSpeed();
     let wake: WakeLockSentinel | undefined;
     started.current = Date.now();
     setRecording(true);
     setAccuracy(undefined);
-    setSpeed(undefined);
+    setSpeedReading(undefined);
     setPosition(undefined);
 
     async function keepScreenOn() {
@@ -65,26 +69,24 @@ export function useTrackRecorder(key: string) {
     document.addEventListener('visibilitychange', keepScreenOn);
 
     const watch = navigator.geolocation.watchPosition(({ coords, timestamp }) => {
-      if (!active) return;
+      if (!active || !Number.isFinite(timestamp) || timestamp <= lastFix) return;
+      lastFix = timestamp;
       const point: TrackPoint = [coords.latitude, coords.longitude];
+      if (!point.every(Number.isFinite)) return;
       if (Number.isFinite(coords.accuracy)) setPosition({ point, accuracy: coords.accuracy });
       setAccuracy(Math.round(coords.accuracy));
-      if (coords.accuracy > 35 || !Number.isFinite(coords.accuracy) || timestamp <= lastTime) {
-        setSpeed(undefined);
-        return;
-      }
+      const reading = estimateSpeed({ point, timestamp, accuracy: coords.accuracy, reported: coords.speed });
+      window.clearTimeout(speedTimeout);
+      setSpeedReading(reading);
+      if (reading) speedTimeout = window.setTimeout(() => setSpeedReading(undefined), 7000);
+      if (coords.accuracy > 35 || !Number.isFinite(coords.accuracy)) return;
       const gap = timestamp - lastTime > 30000;
-      const reportedSpeed = coords.speed;
-      const hasSpeed = reportedSpeed != null && Number.isFinite(reportedSpeed) && reportedSpeed >= 0 && reportedSpeed <= 70;
       if (lastPoint && !gap) {
         const moved = metersBetween(lastPoint, point);
         const seconds = (timestamp - lastTime) / 1000;
         const stationary = moved < Math.max(4, Math.min(coords.accuracy / 2, 12));
         if (moved > seconds * 70 + 35) return;
-        setSpeed(hasSpeed ? reportedSpeed * 3.6 : stationary ? 0 : Math.min(70, moved / seconds) * 3.6);
         if (stationary) return;
-      } else {
-        setSpeed(hasSpeed ? reportedSpeed * 3.6 : undefined);
       }
       if (!lastPoint || gap) {
         segment = [];
@@ -116,6 +118,7 @@ export function useTrackRecorder(key: string) {
       active = false;
       navigator.geolocation.clearWatch(watch);
       window.clearInterval(timer);
+      window.clearTimeout(speedTimeout);
       window.removeEventListener('pagehide', checkpoint);
       document.removeEventListener('visibilitychange', keepScreenOn);
       void wake?.release().catch(() => {});
@@ -129,7 +132,7 @@ export function useTrackRecorder(key: string) {
   function stop() {
     control.current?.();
     setRecording(false);
-    setSpeed(undefined);
+    setSpeedReading(undefined);
     setDuration(durationRef.current);
   }
 
@@ -144,5 +147,5 @@ export function useTrackRecorder(key: string) {
     try { localStorage.removeItem(key); } catch { /* Draft already cleared in memory. */ }
   }
 
-  return { segments, distance: trackDistance(segments), duration, recording, accuracy, speed, position, start, stop, clear };
+  return { segments, distance: trackDistance(segments), duration, recording, accuracy, speed: speedReading?.kmh, speedSource: speedReading?.source, position, start, stop, clear };
 }
