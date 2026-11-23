@@ -1,66 +1,16 @@
-﻿import { useEffect, useRef, useState } from 'react';
+﻿import { useState } from 'react';
 import { Mic, WandSparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-type Recognition = {
-  lang: string;
-  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
-  onerror: (() => void) | null;
-  onend: (() => void) | null;
-  start: () => void;
-  stop: () => void;
-  abort: () => void;
-};
-type SpeechWindow = Window & {
-  SpeechRecognition?: new () => Recognition;
-  webkitSpeechRecognition?: new () => Recognition;
-};
+import { useFrenchDictation } from './use-french-dictation';
 
 export function VehicleDescription({ initial, model }: { initial: string; model: string }) {
   const [description, setDescription] = useState(initial);
   const [notes, setNotes] = useState('');
-  const [mic, setMic] = useState(false);
   const [status, setStatus] = useState('');
-  const recognition = useRef<Recognition | null>(null);
-
-  useEffect(() => () => {
-    if (recognition.current) {
-      recognition.current.onend = null;
-      recognition.current.onerror = null;
-      recognition.current.onresult = null;
-      recognition.current.abort();
-    }
-  }, []);
-
-  function dictate() {
-    if (recognition.current) {
-      recognition.current.stop();
-      return;
-    }
-    const speech = window as SpeechWindow;
-    const Constructor = speech.SpeechRecognition ?? speech.webkitSpeechRecognition;
-    if (!Constructor) {
-      setStatus('La dictée n’est pas disponible dans ce navigateur. Tu peux saisir tes notes.');
-      return;
-    }
-    const instance = new Constructor();
-    instance.lang = 'fr-FR';
-    instance.onresult = event => {
-      const transcript = Array.from(event.results, result => result[0]?.transcript ?? '').join(' ').trim();
-      setNotes(previous => (previous ? previous + ' ' + transcript : transcript).slice(0, 950));
-    };
-    instance.onerror = () => setStatus('La dictée a échoué. Vérifie l’autorisation du micro ou saisis tes notes.');
-    instance.onend = () => { recognition.current = null; setMic(false); };
-    try {
-      instance.start();
-      recognition.current = instance;
-      setMic(true);
-      setStatus('');
-    } catch {
-      setStatus('Impossible de démarrer la dictée.');
-    }
-  }
-
+  const { mic, error, dictate } = useFrenchDictation(text =>
+    setNotes(previous => (previous ? previous + ' ' + text : text).slice(0, 950)),
+  );
   function draft() {
     const sentences = notes.trim().replace(/\s+/g, ' ').split(/(?<=[.!?])\s+/);
     const details = sentences.map(sentence => {
@@ -84,7 +34,7 @@ export function VehicleDescription({ initial, model }: { initial: string; model:
         <Button type="button" variant="outline" onClick={dictate}><Mic /> {mic ? 'Arrêter la dictée' : 'Dicter mes notes'}</Button>
         <Button type="button" variant="secondary" disabled={!notes.trim() || mic} onClick={draft}><WandSparkles /> Préparer un brouillon</Button>
       </div>
-      {status && <p role="status" className="text-sm text-muted-foreground">{status}</p>}
+      {(error || status) && <p role="status" className="text-sm text-muted-foreground">{error || status}</p>}
     </div>
   </div>;
 }

@@ -1,4 +1,4 @@
-const cacheName = 'mybike-startup-v4';
+const cacheName = 'mybike-startup-v5';
 const fallbackPath = '/mybike-startup.html';
 const routes = new Set(['/', '/discussion', '/vehicules', '/map', '/parcours', '/medias']);
 

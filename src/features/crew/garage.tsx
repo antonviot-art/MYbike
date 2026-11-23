@@ -88,7 +88,7 @@ export function GaragePage() {
                 <div className="flex items-center justify-between gap-3 p-4">
                   <div>
                     <h2 className="font-display text-2xl font-semibold">{vehicle.name}</h2>
-                    <p className="text-sm text-muted-foreground">{vehicle.type} · {vehicle.cc} cm³{record.author_id === user?.id && user ? ' · Mon véhicule' : ''}</p>
+                    <p className="text-sm text-muted-foreground">{vehicle.type}{vehicle.cc > 0 && ' · ' + vehicle.cc + ' cm³'}{record.author_id === user?.id && user ? ' · Mon véhicule' : ''}</p>
                   </div>
                   <ChevronRight size={19} aria-hidden="true" />
                 </div>
@@ -138,7 +138,7 @@ function VehicleDetails({ record }: { record: CrewRecord }) {
     const removed = new Set(form.getAll('removePhoto'));
     const kept = photos.filter(path => !removed.has(path));
     const files = form.getAll('photos').filter((file): file is File => file instanceof File && file.size > 0);
-    if (!name || !type || !Number.isInteger(cc) || cc < 1 || !validCounter(hours) || !validCounter(km)) {
+    if (!name || !type || !Number.isInteger(cc) || cc < 0 || !validCounter(hours) || !validCounter(km)) {
       toast.error('Vérifie le modèle, le type, la cylindrée et les compteurs.');
       return;
     }
@@ -194,7 +194,7 @@ function VehicleDetails({ record }: { record: CrewRecord }) {
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="font-display text-5xl font-semibold">{vehicle.name}</h2>
-          <p className="text-muted-foreground">{vehicle.type} · {vehicle.cc} cm³
+          <p className="text-muted-foreground">{vehicle.type}{vehicle.cc > 0 && ' · ' + vehicle.cc + ' cm³'}
             {record.author_id && <Link className="ml-2 underline" to="/pilotes/$pilotId" params={{ pilotId: record.author_id }}>{vehicle.owner || 'Voir le profil'}</Link>}
           </p>
         </div>
@@ -226,7 +226,7 @@ function VehicleDetails({ record }: { record: CrewRecord }) {
           <label className="grid gap-1">Marque et modèle<input name="name" maxLength={80} required defaultValue={vehicle.name} /></label>
           <div className="grid grid-cols-2 gap-3">
             <label className="grid gap-1">Type<input name="type" maxLength={40} required defaultValue={vehicle.type} /></label>
-            <label className="grid gap-1">Cylindrée (cm³)<input name="cc" type="number" min={1} step={1} required defaultValue={vehicle.cc} /></label>
+            <label className="grid gap-1">Cylindrée (cm³)<input name="cc" type="number" min={1} step={1} defaultValue={vehicle.cc || ''} /></label>
           </div>
           <VehicleDescription initial={vehicle.description ?? ''} model={vehicle.name} />
           <label className="grid gap-1">Pièces et équipement<textarea name="parts" maxLength={1200} defaultValue={vehicle.parts} placeholder="Ex. Pneus, suspensions, échappement…" /></label>
