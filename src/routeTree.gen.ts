@@ -14,6 +14,7 @@ import { Route as DiscussionRouteImport } from './routes/discussion'
 import { Route as MapRouteImport } from './routes/map'
 import { Route as MediasRouteImport } from './routes/medias'
 import { Route as ParcoursRouteImport } from './routes/parcours'
+import { Route as RassoRouteImport } from './routes/rasso'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as TalkieRouteImport } from './routes/talkie'
 import { Route as VehiculesRouteImport } from './routes/vehicules'
@@ -44,6 +45,11 @@ const MediasRoute = MediasRouteImport.update({
 const ParcoursRoute = ParcoursRouteImport.update({
   id: '/parcours',
   path: '/parcours',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RassoRoute = RassoRouteImport.update({
+  id: '/rasso',
+  path: '/rasso',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
@@ -83,6 +89,7 @@ export interface FileRoutesByFullPath {
   '/map': typeof MapRoute
   '/medias': typeof MediasRoute
   '/parcours': typeof ParcoursRoute
+  '/rasso': typeof RassoRoute
   '/reset-password': typeof ResetPasswordRoute
   '/talkie': typeof TalkieRoute
   '/vehicules': typeof VehiculesRoute
@@ -96,6 +103,7 @@ export interface FileRoutesByTo {
   '/map': typeof MapRoute
   '/medias': typeof MediasRoute
   '/parcours': typeof ParcoursRoute
+  '/rasso': typeof RassoRoute
   '/reset-password': typeof ResetPasswordRoute
   '/talkie': typeof TalkieRoute
   '/vehicules': typeof VehiculesRoute
@@ -110,6 +118,7 @@ export interface FileRoutesById {
   '/map': typeof MapRoute
   '/medias': typeof MediasRoute
   '/parcours': typeof ParcoursRoute
+  '/rasso': typeof RassoRoute
   '/reset-password': typeof ResetPasswordRoute
   '/talkie': typeof TalkieRoute
   '/vehicules': typeof VehiculesRoute
@@ -125,6 +134,7 @@ export interface FileRouteTypes {
     | '/map'
     | '/medias'
     | '/parcours'
+    | '/rasso'
     | '/reset-password'
     | '/talkie'
     | '/vehicules'
@@ -138,6 +148,7 @@ export interface FileRouteTypes {
     | '/map'
     | '/medias'
     | '/parcours'
+    | '/rasso'
     | '/reset-password'
     | '/talkie'
     | '/vehicules'
@@ -151,6 +162,7 @@ export interface FileRouteTypes {
     | '/map'
     | '/medias'
     | '/parcours'
+    | '/rasso'
     | '/reset-password'
     | '/talkie'
     | '/vehicules'
@@ -165,6 +177,7 @@ export interface RootRouteChildren {
   MapRoute: typeof MapRoute
   MediasRoute: typeof MediasRoute
   ParcoursRoute: typeof ParcoursRoute
+  RassoRoute: typeof RassoRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   TalkieRoute: typeof TalkieRoute
   VehiculesRoute: typeof VehiculesRoute
@@ -208,6 +221,13 @@ declare module '@tanstack/react-router' {
       path: '/parcours'
       fullPath: '/parcours'
       preLoaderRoute: typeof ParcoursRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rasso': {
+      id: '/rasso'
+      path: '/rasso'
+      fullPath: '/rasso'
+      preLoaderRoute: typeof RassoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reset-password': {
@@ -261,6 +281,7 @@ const rootRouteChildren: RootRouteChildren = {
   MapRoute: MapRoute,
   MediasRoute: MediasRoute,
   ParcoursRoute: ParcoursRoute,
+  RassoRoute: RassoRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   TalkieRoute: TalkieRoute,
   VehiculesRoute: VehiculesRoute,

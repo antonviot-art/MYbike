@@ -1,7 +1,7 @@
 ﻿import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Bike, Flag, House, Images, LockKeyhole, Map, MessageSquare, Route as RouteIcon, Settings, UserRound } from 'lucide-react';
+import { ArrowLeft, Bike, CalendarDays, Flag, House, Images, LockKeyhole, Map, MessageSquare, Route as RouteIcon, Settings, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -17,6 +17,7 @@ const tabs = [
   { to: '/vehicules', label: 'Véhicules', icon: Bike },
   { to: '/map', label: 'Localiser', icon: Map },
   { to: '/parcours', label: 'Parcours', icon: RouteIcon },
+  { to: '/rasso', label: 'Rasso', icon: CalendarDays },
   { to: '/medias', label: 'Médias', icon: Images },
 ] as const;
 

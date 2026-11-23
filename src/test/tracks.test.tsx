@@ -3,6 +3,19 @@ import { expect, it, vi } from 'vitest';
 import { useTrackRecorder } from '@/features/crew/use-track-recorder';
 import { createRideSpeed } from '@/features/crew/ride-speed';
 import { metersFromRoute, readStops } from '@/features/crew/tracks';
+import { livePilots } from '@/features/crew/live-location';
+
+it('shows only current positions and deduplicates a pilot sharing from two devices', () => {
+  const position = (id: string, pilot: string, expires: number) => ({
+    id, author_id: pilot, kind: 'live-position', payload: { lat: 48, lng: 4.5, label: pilot, expires },
+  });
+  expect(livePilots([
+    position('a', 'Anton', 5000),
+    position('b', 'Maxime', 2000),
+    position('c', 'Lucas', 6000),
+    position('d', 'Lucas', 7000),
+  ], 3000, 'Anton')).toEqual([{ lat: 48, lng: 4.5, label: 'Lucas', live: true, expires: 7000 }]);
+});
 
 it('measures the nearest point on the trace without connecting a gap', () => {
   const segments: [number, number][][] = [[[0, 0], [0, 0.001]], [[0, 0.003], [0, 0.004]]];

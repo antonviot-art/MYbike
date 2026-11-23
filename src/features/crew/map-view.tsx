@@ -3,13 +3,14 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useCrew } from './context';
 
-type Marker = { lat: number; lng: number; label: string; live?: boolean; current?: boolean; accuracy?: number };
+type Marker = { lat: number; lng: number; label: string; live?: boolean; current?: boolean; accuracy?: number; showName?: boolean };
 
-export default function MapView({ points, segments, markers, focus, follow = false, onPoint }: {
+export default function MapView({ points, segments, markers, focus, focusGroup = false, follow = false, onPoint }: {
   points: [number, number][];
   segments?: [number, number][][];
   markers: Marker[];
   focus: number;
+  focusGroup?: boolean;
   follow?: boolean;
   onPoint: (lat: number, lng: number) => void;
 }) {
@@ -73,16 +74,18 @@ export default function MapView({ points, segments, markers, focus, follow = fal
         continue;
       }
       const options = { radius: 8, color: marker.live ? liveColor : color, fillOpacity: 0.7, weight: 3 };
-      L.circleMarker([marker.lat, marker.lng], options).bindPopup(label).addTo(group);
+      const dot = L.circleMarker([marker.lat, marker.lng], options).bindPopup(label).addTo(group);
+      if (marker.showName) dot.bindTooltip(label.cloneNode(true) as HTMLElement, { direction: 'top', offset: [0, -8], permanent: true });
     }
     if (segments?.length) L.polyline(segments, { color, weight: 4 }).addTo(group);
     else if (points.length > 1) L.polyline(points, { color, weight: 4 }).addTo(group);
   }, [points, segments, markers]);
 
   useEffect(() => {
+    if (focusGroup) return;
     const positions = segments?.flat() ?? points;
     if (positions.length) map.current?.fitBounds(L.latLngBounds(positions), { padding: [30, 30], maxZoom: 16 });
-  }, [points, segments, follow]);
+  }, [points, segments, follow, focusGroup]);
 
   useEffect(() => {
     if (followLat === undefined || followLng === undefined) return;
@@ -92,8 +95,10 @@ export default function MapView({ points, segments, markers, focus, follow = fal
   useEffect(() => {
     if (!focus) return;
     const list = currentMarkers.current.filter(marker => marker.live && Number.isFinite(marker.lat) && Number.isFinite(marker.lng));
-    if (list.length) map.current?.fitBounds(L.latLngBounds(list.map(marker => [marker.lat, marker.lng])), { padding: [50, 50], maxZoom: 14 });
-  }, [focus]);
+    const current = list.find(marker => marker.current);
+    const group = current && !focusGroup ? [current] : list;
+    if (group.length) map.current?.fitBounds(L.latLngBounds(group.map(marker => [marker.lat, marker.lng])), { padding: [50, 50], maxZoom: 14 });
+  }, [focus, focusGroup]);
 
   return <div ref={el} className="map-canvas" aria-label="Carte interactive des sorties" />;
 }

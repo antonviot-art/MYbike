@@ -1,6 +1,24 @@
 ﻿import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import type { CrewRecord } from './data';
+
+export function livePilots(records: CrewRecord[], now: number, exclude?: string) {
+  const active = new Map<string, { lat: number; lng: number; label: string; live: true; expires: number }>();
+  if (!now) return [];
+  for (const record of records) {
+    if (record.kind !== 'live-position' || (exclude && record.author_id === exclude)) continue;
+    const lat = Number(record.payload['lat']);
+    const lng = Number(record.payload['lng']);
+    const expires = Number(record.payload['expires']);
+    if (!Number.isFinite(expires) || expires <= now || !Number.isFinite(lat) || !Number.isFinite(lng) ||
+        Math.abs(lat) > 90 || Math.abs(lng) > 180) continue;
+    const id = record.author_id ?? record.id;
+    if ((active.get(id)?.expires ?? 0) >= expires) continue;
+    active.set(id, { lat, lng, label: String(record.payload['label'] || 'Pilote'), live: true, expires });
+  }
+  return [...active.values()];
+}
 
 export function useLiveLocation(userId: string | undefined, name: string, enabled: boolean, stop: () => void) {
   useEffect(() => {
