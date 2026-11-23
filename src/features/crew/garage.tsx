@@ -67,6 +67,25 @@ function VehicleGallery({ photos, label }: { photos: string[]; label: string }) 
 
 type Details = Vehicle & { description?: string; parts?: string; photos?: string[] };
 
+function VehicleNotes({ vehicle, compact = false }: { vehicle: Details; compact?: boolean }) {
+  const description = vehicle.description?.trim();
+  const parts = vehicle.parts?.trim();
+  return <dl className={compact ? 'grid gap-2 border-t border-border/60 px-4 py-3 text-sm' : 'grid gap-4 sm:grid-cols-2'}>
+    <div className="min-w-0">
+      <dt className="font-semibold">Description</dt>
+      <dd className={`mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground ${compact ? 'line-clamp-2' : ''}`}>
+        {description || 'Aucune description renseignée.'}
+      </dd>
+    </div>
+    <div className="min-w-0">
+      <dt className="font-semibold">Pièces et équipement</dt>
+      <dd className={`mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground ${compact ? 'line-clamp-2' : ''}`}>
+        {parts || 'Aucune pièce renseignée.'}
+      </dd>
+    </div>
+  </dl>;
+}
+
 export function GaragePage() {
   const { records, user } = useCrew();
   const vehicles = records.filter(record => record.kind === 'vehicle');
@@ -92,6 +111,7 @@ export function GaragePage() {
                   </div>
                   <ChevronRight size={19} aria-hidden="true" />
                 </div>
+                <VehicleNotes vehicle={vehicle} compact />
               </Link>
             </article>
           );
@@ -202,8 +222,7 @@ function VehicleDetails({ record }: { record: CrewRecord }) {
       </header>
       {!editing ? <>
         <VehicleGallery photos={photos.length ? photos : [images[vehicle.image] ?? '']} label={vehicle.name} />
-        {vehicle.description && <section><h3 className="font-semibold">Description</h3><p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">{vehicle.description}</p></section>}
-        {vehicle.parts && <section><h3 className="font-semibold">Pièces et équipement</h3><p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">{vehicle.parts}</p></section>}
+        <VehicleNotes vehicle={vehicle} />
         {editable && <>
           <div className="grid grid-cols-2 gap-2 text-sm">
             <p className="flex items-center gap-2"><Timer size={16} /> {vehicle.hours} h moteur</p>
