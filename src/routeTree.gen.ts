@@ -17,6 +17,7 @@ import { Route as ParcoursRouteImport } from './routes/parcours'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as TalkieRouteImport } from './routes/talkie'
 import { Route as VehiculesRouteImport } from './routes/vehicules'
+import { Route as ParcoursRideIdRouteImport } from './routes/parcours_.$rideId'
 import { Route as PilotesPilotIdRouteImport } from './routes/pilotes.$pilotId'
 import { Route as VehiculesVehicleIdRouteImport } from './routes/vehicules_.$vehicleId'
 
@@ -60,6 +61,11 @@ const VehiculesRoute = VehiculesRouteImport.update({
   path: '/vehicules',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ParcoursRideIdRoute = ParcoursRideIdRouteImport.update({
+  id: '/parcours_/$rideId',
+  path: '/parcours/$rideId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PilotesPilotIdRoute = PilotesPilotIdRouteImport.update({
   id: '/pilotes/$pilotId',
   path: '/pilotes/$pilotId',
@@ -80,6 +86,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/talkie': typeof TalkieRoute
   '/vehicules': typeof VehiculesRoute
+  '/parcours/$rideId': typeof ParcoursRideIdRoute
   '/pilotes/$pilotId': typeof PilotesPilotIdRoute
   '/vehicules/$vehicleId': typeof VehiculesVehicleIdRoute
 }
@@ -92,6 +99,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/talkie': typeof TalkieRoute
   '/vehicules': typeof VehiculesRoute
+  '/parcours/$rideId': typeof ParcoursRideIdRoute
   '/pilotes/$pilotId': typeof PilotesPilotIdRoute
   '/vehicules/$vehicleId': typeof VehiculesVehicleIdRoute
 }
@@ -105,6 +113,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/talkie': typeof TalkieRoute
   '/vehicules': typeof VehiculesRoute
+  '/parcours_/$rideId': typeof ParcoursRideIdRoute
   '/pilotes/$pilotId': typeof PilotesPilotIdRoute
   '/vehicules_/$vehicleId': typeof VehiculesVehicleIdRoute
 }
@@ -119,6 +128,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/talkie'
     | '/vehicules'
+    | '/parcours/$rideId'
     | '/pilotes/$pilotId'
     | '/vehicules/$vehicleId'
   fileRoutesByTo: FileRoutesByTo
@@ -131,6 +141,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/talkie'
     | '/vehicules'
+    | '/parcours/$rideId'
     | '/pilotes/$pilotId'
     | '/vehicules/$vehicleId'
   id:
@@ -143,6 +154,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/talkie'
     | '/vehicules'
+    | '/parcours_/$rideId'
     | '/pilotes/$pilotId'
     | '/vehicules_/$vehicleId'
   fileRoutesById: FileRoutesById
@@ -156,6 +168,7 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   TalkieRoute: typeof TalkieRoute
   VehiculesRoute: typeof VehiculesRoute
+  ParcoursRideIdRoute: typeof ParcoursRideIdRoute
   PilotesPilotIdRoute: typeof PilotesPilotIdRoute
   VehiculesVehicleIdRoute: typeof VehiculesVehicleIdRoute
 }
@@ -218,6 +231,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VehiculesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/parcours_/$rideId': {
+      id: '/parcours_/$rideId'
+      path: '/parcours/$rideId'
+      fullPath: '/parcours/$rideId'
+      preLoaderRoute: typeof ParcoursRideIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/pilotes/$pilotId': {
       id: '/pilotes/$pilotId'
       path: '/pilotes/$pilotId'
@@ -244,6 +264,7 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   TalkieRoute: TalkieRoute,
   VehiculesRoute: VehiculesRoute,
+  ParcoursRideIdRoute: ParcoursRideIdRoute,
   PilotesPilotIdRoute: PilotesPilotIdRoute,
   VehiculesVehicleIdRoute: VehiculesVehicleIdRoute,
 }

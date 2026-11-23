@@ -1,6 +1,6 @@
-﻿import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { metersBetween, readSegments, trackDistance, type TrackPoint } from './tracks';
+import { metersBetween, readSegments, readStops, trackDistance, type TrackPoint, type TrackStop } from './tracks';
 import { createRideSpeed, type SpeedReading } from './ride-speed';
 
 const maxPoints = 12000;
@@ -12,6 +12,10 @@ export function useTrackRecorder(key: string) {
   const [accuracy, setAccuracy] = useState<number>();
   const [speedReading, setSpeedReading] = useState<SpeedReading>();
   const [position, setPosition] = useState<{ point: TrackPoint; accuracy: number }>();
+  const [stops, setStops] = useState<TrackStop[]>([]);
+  const savedStops = useRef<TrackStop[]>([]);
+  const moving = useRef({ milliseconds: 0, meters: 0 });
+  const [motion, setMotion] = useState(moving.current);
   const data = useRef<TrackPoint[][]>([]);
   const durationRef = useRef(0);
   const started = useRef(0);
@@ -23,6 +27,10 @@ export function useTrackRecorder(key: string) {
       if (draft) {
         data.current = readSegments(draft.segments);
         durationRef.current = Number.isFinite(draft.duration) ? Math.max(0, draft.duration) : 0;
+        savedStops.current = readStops(draft.stops);
+        if (Number.isFinite(draft.motion?.milliseconds) && Number.isFinite(draft.motion?.meters)) moving.current = draft.motion;
+        setStops(savedStops.current);
+        setMotion(moving.current);
         setSegments(data.current);
         setDuration(durationRef.current);
       }
@@ -35,6 +43,8 @@ export function useTrackRecorder(key: string) {
       localStorage.setItem(key, JSON.stringify({
         segments: data.current,
         duration: durationRef.current + (started.current ? Date.now() - started.current : 0),
+        stops: savedStops.current,
+        motion: moving.current,
       }));
     } catch { /* The current session still holds the route. */ }
   }
@@ -50,6 +60,7 @@ export function useTrackRecorder(key: string) {
     let lastFix = -Infinity;
     let speedTimeout: number | undefined;
     const estimateSpeed = createRideSpeed();
+    let previousMotion: { kmh: number; time: number } | undefined;
     let wake: WakeLockSentinel | undefined;
     started.current = Date.now();
     setRecording(true);
@@ -76,6 +87,18 @@ export function useTrackRecorder(key: string) {
       if (Number.isFinite(coords.accuracy)) setPosition({ point, accuracy: coords.accuracy });
       setAccuracy(Math.round(coords.accuracy));
       const reading = estimateSpeed({ point, timestamp, accuracy: coords.accuracy, reported: coords.speed });
+      if (reading && previousMotion) {
+        const milliseconds = timestamp - previousMotion.time;
+        const average = (previousMotion.kmh + reading.kmh) / 2;
+        if (milliseconds <= 7000 && average >= 3.6) {
+          moving.current = {
+            milliseconds: moving.current.milliseconds + milliseconds,
+            meters: moving.current.meters + average * milliseconds / 3600,
+          };
+          setMotion(moving.current);
+        }
+      }
+      previousMotion = reading ? { kmh: reading.kmh, time: timestamp } : undefined;
       window.clearTimeout(speedTimeout);
       setSpeedReading(reading);
       if (reading) speedTimeout = window.setTimeout(() => setSpeedReading(undefined), 7000);
@@ -140,6 +163,10 @@ export function useTrackRecorder(key: string) {
     stop();
     data.current = [];
     durationRef.current = 0;
+    savedStops.current = [];
+    moving.current = { milliseconds: 0, meters: 0 };
+    setStops([]);
+    setMotion(moving.current);
     setSegments([]);
     setDuration(0);
     setAccuracy(undefined);
@@ -147,5 +174,13 @@ export function useTrackRecorder(key: string) {
     try { localStorage.removeItem(key); } catch { /* Draft already cleared in memory. */ }
   }
 
-  return { segments, distance: trackDistance(segments), duration, recording, accuracy, speed: speedReading?.kmh, speedSource: speedReading?.source, position, start, stop, clear };
+  function addStop(label: string) {
+    if (!position || position.accuracy > 35 || !label.trim() || savedStops.current.length >= 80) return false;
+    savedStops.current = [...savedStops.current, { point: position.point, label: label.trim().slice(0, 80) }];
+    setStops(savedStops.current);
+    persist();
+    return true;
+  }
+
+  return { segments, distance: trackDistance(segments), duration, recording, accuracy, speed: speedReading?.kmh, speedSource: speedReading?.source, position, motion, stops, addStop, start, stop, clear };
 }

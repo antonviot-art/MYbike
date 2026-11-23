@@ -1,7 +1,19 @@
-﻿import { act, renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { useTrackRecorder } from '@/features/crew/use-track-recorder';
 import { createRideSpeed } from '@/features/crew/ride-speed';
+import { metersFromRoute, readStops } from '@/features/crew/tracks';
+
+it('measures the nearest point on the trace without connecting a gap', () => {
+  const segments: [number, number][][] = [[[0, 0], [0, 0.001]], [[0, 0.003], [0, 0.004]]];
+  expect(metersFromRoute([0, 0.0005], segments)).toBeCloseTo(0);
+  expect(metersFromRoute([0, 0.002], segments)).toBeCloseTo(111.195, 1);
+});
+
+it('only keeps named markers with valid coordinates', () => {
+  expect(readStops([{ point: [48, 4.5], label: 'Pause' }, { point: [97, 0], label: 'Hors carte' }]))
+    .toEqual([{ point: [48, 4.5], label: 'Pause' }]);
+});
 
 it('uses the device speed and shows zero immediately when it reports a stop', () => {
   const estimate = createRideSpeed();

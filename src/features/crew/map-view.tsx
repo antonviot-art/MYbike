@@ -5,11 +5,12 @@ import { useCrew } from './context';
 
 type Marker = { lat: number; lng: number; label: string; live?: boolean; current?: boolean; accuracy?: number };
 
-export default function MapView({ points, segments, markers, focus, onPoint }: {
+export default function MapView({ points, segments, markers, focus, follow = false, onPoint }: {
   points: [number, number][];
   segments?: [number, number][][];
   markers: Marker[];
   focus: number;
+  follow?: boolean;
   onPoint: (lat: number, lng: number) => void;
 }) {
   const el = useRef<HTMLDivElement>(null);
@@ -20,6 +21,9 @@ export default function MapView({ points, segments, markers, focus, onPoint }: {
   callback.current = onPoint;
   const currentMarkers = useRef(markers);
   currentMarkers.current = markers;
+  const followed = follow ? markers.find(marker => marker.current) : undefined;
+  const followLat = followed?.lat;
+  const followLng = followed?.lng;
 
   useEffect(() => {
     if (!el.current) return;
@@ -76,7 +80,12 @@ export default function MapView({ points, segments, markers, focus, onPoint }: {
   useEffect(() => {
     const positions = segments?.flat() ?? points;
     if (positions.length) map.current?.fitBounds(L.latLngBounds(positions), { padding: [30, 30], maxZoom: 16 });
-  }, [points, segments]);
+  }, [points, segments, follow]);
+
+  useEffect(() => {
+    if (followLat === undefined || followLng === undefined) return;
+    map.current?.panTo([followLat, followLng], { animate: false });
+  }, [followLat, followLng]);
 
   useEffect(() => {
     if (!focus) return;

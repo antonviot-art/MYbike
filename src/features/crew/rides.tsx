@@ -1,11 +1,11 @@
-﻿import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 import { ClientOnly, Link } from '@tanstack/react-router';
-import { Circle, Gauge, Maximize, Route, Share2, Square, X } from 'lucide-react';
+import { Circle, Gauge, MapPin, Maximize, Route, Share2, Square, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { useCrew } from './context';
 import { CrewShell } from './shell';
-import { kilometers, readSegments, type TrackPoint } from './tracks';
+import { kilometers, readSegments, type TrackPoint, type TrackStop } from './tracks';
 import { useTrackRecorder } from './use-track-recorder';
 import { socialCall } from './social';
 import type { CrewRecord } from './data';
@@ -15,13 +15,14 @@ const ignoreMapClick = () => {};
 const noPoints: TrackPoint[] = [];
 type Position = { point: TrackPoint; accuracy: number };
 
-export function TrackMap({ segments, position }: { segments: TrackPoint[][]; position?: Position | undefined }) {
-  const markers = position ? [{
-    lat: position.point[0], lng: position.point[1], accuracy: position.accuracy, label: 'Ta position GPS', current: true, live: true,
-  }] : [];
+export function TrackMap({ segments, position, stops = [], follow = false }: { segments: TrackPoint[][]; position?: Position | undefined; stops?: TrackStop[]; follow?: boolean }) {
+  const markers = [
+    ...stops.map(stop => ({ lat: stop.point[0], lng: stop.point[1], label: stop.label })),
+    ...(position ? [{ lat: position.point[0], lng: position.point[1], accuracy: position.accuracy, label: 'Ta position GPS', current: true, live: true }] : []),
+  ];
   return <ClientOnly fallback={<div className="track-map map-canvas bg-secondary grid place-items-center">Chargement de la carte…</div>}>
     <Suspense fallback={<div className="track-map map-canvas bg-secondary" />}>
-      <div className="track-map"><MapView points={noPoints} segments={segments} markers={markers} focus={position ? 1 : 0} onPoint={ignoreMapClick} /></div>
+      <div className="track-map"><MapView points={noPoints} segments={segments} markers={markers} follow={follow} focus={position ? 1 : 0} onPoint={ignoreMapClick} /></div>
     </Suspense>
   </ClientOnly>;
 }
@@ -80,7 +81,7 @@ function TrackCard({ record, authors }: { record: CrewRecord; authors: boolean }
 
   async function share() {
     if (!author) return;
-    const url = new URL('/pilotes/' + encodeURIComponent(author) + '#' + anchor, window.location.origin).href;
+    const url = new URL('/parcours/' + encodeURIComponent(record.id), window.location.origin).href;
     try {
       if (navigator.share) await navigator.share({ title, url });
       else { await navigator.clipboard.writeText(url); toast.success('Lien du parcours copié.'); }
@@ -99,6 +100,7 @@ function TrackCard({ record, authors }: { record: CrewRecord; authors: boolean }
     </p>
     {description && <p className="mt-2 whitespace-pre-wrap break-words">{description}</p>}
     <div className="mt-3 flex flex-wrap gap-2">
+      <Button asChild size="sm"><Link to="/parcours/$rideId" params={{ rideId: record.id }}><Route /> Refaire ce parcours</Link></Button>
       {author && <Button variant="outline" size="sm" onClick={share}><Share2 /> Partager</Button>}
       {editable && <Button variant="outline" size="sm" onClick={() => setMode(mode === 'edit' ? undefined : 'edit')}>Modifier</Button>}
       {editable && <Button variant="ghost" size="sm" onClick={() => setMode(mode === 'delete' ? undefined : 'delete')}>Supprimer</Button>}
@@ -126,6 +128,7 @@ function RideRecorder() {
   const [saving, setSaving] = useState(false);
   const [discard, setDiscard] = useState(false);
   const [dashboard, setDashboard] = useState(false);
+  const [addingStop, setAddingStop] = useState(false);
   const canSave = draft.segments.some(segment => segment.length > 1);
   const rides = records.filter(record => record.kind === 'ride-track').slice().reverse();
 
@@ -146,7 +149,7 @@ function RideRecorder() {
     if (!title) return;
     setSaving(true);
     try {
-      await add('ride-track', { name: title, description, pilot: name, segments: draft.segments, distance: draft.distance, duration: draft.duration });
+      await add('ride-track', { name: title, description, pilot: name, segments: draft.segments, distance: draft.distance, duration: draft.duration, motion: draft.motion, stops: draft.stops });
       draft.clear();
       target.reset();
       toast.success(user ? 'Parcours partagé sur ton profil.' : 'Parcours ajouté à cette démo.');
@@ -173,11 +176,11 @@ function RideRecorder() {
         <p>{kilometers(draft.distance)} · {duration}</p>
         {draft.recording && <Button onClick={() => { draft.stop(); setDashboard(false); }}><Square /> Arrêter</Button>}
       </div>
-      <TrackMap segments={draft.segments} position={draft.position} />
+      <TrackMap segments={draft.segments} position={draft.position} stops={draft.stops} />
     </section>}
     <section className="ride-record grid gap-4">
       <h2 className="text-xl font-semibold">Enregistrer un parcours</h2>
-      {!dashboard && <TrackMap segments={draft.segments} position={draft.position} />}
+      {!dashboard && <TrackMap segments={draft.segments} position={draft.position} stops={draft.stops} />}
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <strong>{kilometers(draft.distance)}</strong><span>{duration}</span>
         {draft.recording && <span role="status">{draft.accuracy === undefined ? 'Recherche du signal GPS…' : draft.accuracy > 35 ? 'Signal GPS faible · en attente d’un meilleur point' : 'Précision GPS ± ' + draft.accuracy + ' m'}</span>}
@@ -189,10 +192,26 @@ function RideRecorder() {
           ? <Button onClick={draft.stop}><Square /> Arrêter</Button>
           : <Button onClick={draft.start} disabled={saving}><Circle /> {draft.segments.length ? 'Reprendre' : 'Démarrer'}</Button>}
         {draft.recording && <Button variant="outline" onClick={() => setDashboard(true)}><Maximize /> Tableau de bord</Button>}
+        {draft.recording && <Button variant="outline" disabled={!draft.position || draft.position.accuracy > 35} onClick={() => setAddingStop(!addingStop)}><MapPin /> Ajouter un repère</Button>}
         {!draft.recording && draft.segments.length > 0 && <Button variant="ghost" disabled={saving} onClick={() => {
           if (discard) { draft.clear(); setDiscard(false); } else setDiscard(true);
         }}>{discard ? 'Confirmer la suppression' : 'Effacer le brouillon'}</Button>}
       </div>
+      {draft.recording && addingStop && <form className="flex flex-wrap gap-2" onSubmit={event => {
+        event.preventDefault();
+        const label = String(new FormData(event.currentTarget).get('label') ?? '');
+        if (!draft.addStop(label)) { toast.error('Vérifie le nom et le signal GPS.'); return; }
+        setAddingStop(false);
+        toast.success('Repère ajouté au parcours.');
+      }}>
+        <input name="label" className="flex-1" placeholder="Ex. Pause ou rendez-vous" aria-label="Nom du repère" maxLength={80} required />
+        <Button>Enregistrer le repère</Button>
+      </form>}
+      {!draft.recording && canSave && <dl className="grid grid-cols-3 gap-2 text-sm">
+        <div><dt>Distance</dt><dd className="font-semibold">{kilometers(draft.distance)}</dd></div>
+        <div><dt>Durée</dt><dd className="font-semibold">{duration}</dd></div>
+        <div><dt>Moyenne en mouvement</dt><dd className="font-semibold">{draft.motion.milliseconds > 0 ? (draft.motion.meters * 3600 / draft.motion.milliseconds).toFixed(1) + ' km/h' : '—'}</dd></div>
+      </dl>}
       {!draft.recording && canSave && <form onSubmit={publish} className="grid gap-2">
         <input name="title" aria-label="Nom du parcours" placeholder="Nom du parcours" required maxLength={80} />
         <textarea name="description" aria-label="Description du parcours" placeholder="Description (facultative)" maxLength={600} />

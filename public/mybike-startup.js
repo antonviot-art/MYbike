@@ -1,4 +1,4 @@
-const cacheName = 'mybike-startup-v3';
+const cacheName = 'mybike-startup-v4';
 const fallbackPath = '/mybike-startup.html';
 const routes = new Set(['/', '/discussion', '/vehicules', '/map', '/parcours', '/medias']);
 
@@ -24,7 +24,7 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (event.request.mode !== 'navigate' || event.request.method !== 'GET' ||
-      url.origin !== self.location.origin || url.search || !(routes.has(url.pathname) || /^\/(?:pilotes|vehicules)\/[^/]+$/.test(url.pathname))) return;
+      url.origin !== self.location.origin || url.search || !(routes.has(url.pathname) || /^\/(?:pilotes|vehicules|parcours)\/[^/]+$/.test(url.pathname))) return;
 
   const network = fetch(event.request).catch(() => null);
   event.waitUntil(network.then(() => {}));

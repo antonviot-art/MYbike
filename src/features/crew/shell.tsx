@@ -208,7 +208,7 @@ export function CrewShell({ tab, immersive = false, children }: { tab: string; i
       {!immersive && <nav className="app-nav" aria-label="Navigation principale">
         <div className="app-nav-links">
           {tabs.map(({ to, label, icon: Icon }) => (
-            <Link key={to} to={to} activeOptions={{ exact: to !== '/vehicules' }} className="nav-item">
+            <Link key={to} to={to} activeOptions={{ exact: to !== '/vehicules' && to !== '/parcours' }} className="nav-item">
               <Icon size={20} aria-hidden="true" />
               {label}
             </Link>

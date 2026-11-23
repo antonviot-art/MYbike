@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Download, Images, MapPin, Play, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -41,12 +41,12 @@ function coordinates(value: unknown): TrackPoint | undefined {
   return undefined;
 }
 
-export function MediaPage() {
+export function MediaPage({ initialRide }: { initialRide?: string | undefined }) {
   const { user } = useCrew();
-  return <MediaGallery key={user?.id ?? 'demo'} />;
+  return <MediaGallery key={(user?.id ?? 'demo') + (initialRide ?? '')} initialRide={initialRide} />;
 }
 
-function MediaGallery() {
+function MediaGallery({ initialRide }: { initialRide: string | undefined }) {
   const { records, add, upload, user, refresh } = useCrew();
   const [visibility, setVisibility] = useState('public');
   const [filter, setFilter] = useState('Toutes les sorties');
@@ -54,8 +54,9 @@ function MediaGallery() {
   const [selected, setSelected] = useState<MediaItem>();
   const [busy, setBusy] = useState(false);
   const [extra, setExtra] = useState<MediaItem[]>([]);
-  const [publishing, setPublishing] = useState(false);
+  const [publishing, setPublishing] = useState(Boolean(initialRide));
   const [files, setFiles] = useState<File[]>([]);
+  const rides = records.filter(record => record.kind === 'ride-track').slice().reverse();
 
   useEffect(() => {
     let active = true;
@@ -89,6 +90,7 @@ function MediaGallery() {
     const fields = new FormData(event.currentTarget);
     const description = String(fields.get('description') ?? '').trim();
     const place = String(fields.get('place') ?? '').trim();
+    const ride = rides.find(item => item.id === fields.get('ride'));
     const includeGps = fields.has('gps');
     setBusy(true);
     try {
@@ -116,7 +118,8 @@ function MediaGallery() {
         const preview = previewBlob ? await upload(previewBlob, 'jpg', folder) : original;
         await add('media', {
           original, preview, title: file.name, date: new Date().toISOString().slice(0, 10),
-          session: 'Nouvelle sortie', video, visibility, description, place, ...(gps ? { gps } : {}),
+          session: ride ? String(ride.payload['name'] ?? 'Parcours') : 'Nouvelle sortie',
+          video, visibility, description, place, ...(gps ? { gps } : {}), ...(ride ? { rideId: ride.id } : {}),
         });
         setFiles(pending => pending.filter(item => item !== file));
       }
@@ -173,6 +176,11 @@ function MediaGallery() {
           {files.length > 0 && <p className="text-sm text-muted-foreground">{files.length} fichier(s) à publier</p>}
           <label className="grid gap-1">Description<textarea name="description" rows={3} maxLength={600} /></label>
           <label className="grid gap-1">Lieu (facultatif)<input name="place" maxLength={120} placeholder="Ex. Forêt de Clairvaux" /></label>
+          {rides.length > 0 && <label className="grid gap-1">Associer à un parcours
+            <select name="ride" defaultValue={initialRide ?? ''}><option value="">Aucun parcours</option>
+              {rides.map(ride => <option key={ride.id} value={ride.id}>{String(ride.payload['name'] ?? 'Parcours')}</option>)}
+            </select>
+          </label>}
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="gps" /> Afficher les coordonnées GPS des photos JPEG qui en contiennent</label>
           {user && <label className="grid gap-1">Visibilité<select value={visibility} onChange={event => setVisibility(event.target.value)} disabled={busy}>
             <option value="public">Public sur MYbike</option><option value="friends">Amis seulement</option>

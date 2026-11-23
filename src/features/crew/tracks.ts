@@ -1,5 +1,5 @@
-﻿export type TrackPoint = [number, number];
-export type Track = { segments: TrackPoint[][]; distance: number; duration: number };
+export type TrackPoint = [number, number];
+export type TrackStop = { point: TrackPoint; label: string };
 
 const radians = Math.PI / 180;
 
@@ -30,4 +30,37 @@ export function readSegments(value: unknown): TrackPoint[][] {
 
 export function kilometers(distance: number) {
   return (distance / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 2 }) + ' km';
+}
+
+export function readStops(value: unknown): TrackStop[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(item => {
+    if (typeof item !== 'object' || !item || typeof item.label !== 'string' || !item.label.trim()) return [];
+    const point = readSegments([[item.point]])[0]?.[0];
+    return point ? [{ point, label: item.label.slice(0, 80) }] : [];
+  }).slice(0, 80);
+}
+
+export function metersFromRoute(point: TrackPoint, segments: TrackPoint[][]) {
+  const scale = Math.PI * 6371000 / 180;
+  const xScale = scale * Math.cos(point[0] * radians);
+  let nearest = Infinity;
+  for (const segment of segments) {
+    let last: TrackPoint | undefined;
+    for (const [lat, lon] of segment) {
+      const x = ((lon - point[1] + 540) % 360 - 180) * xScale;
+      const y = (lat - point[0]) * scale;
+      nearest = Math.min(nearest, Math.hypot(x, y));
+      if (last) {
+        const dx = x - last[0], dy = y - last[1];
+        const squared = dx * dx + dy * dy;
+        if (squared) {
+          const ratio = Math.min(1, Math.max(0, -(last[0] * dx + last[1] * dy) / squared));
+          nearest = Math.min(nearest, Math.hypot(last[0] + ratio * dx, last[1] + ratio * dy));
+        }
+      }
+      last = [x, y];
+    }
+  }
+  return nearest;
 }
