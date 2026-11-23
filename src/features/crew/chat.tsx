@@ -1,19 +1,64 @@
 ﻿import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, BarChart3, Copy, MapPin, MessageSquare, Mic, Send, Square } from 'lucide-react';
+import { ArrowLeft, BarChart3, Camera, Copy, MapPin, MessageSquare, Mic, Plus, Send, Square, UsersRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { Link } from '@tanstack/react-router';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { resolveMedia, useCrew } from './context';
 import { Avatar, CrewShell } from './shell';
 import type { Message } from './data';
 import { frenchRegions } from './regions';
 import { socialCall, type SharedRoom } from './social';
+import { croppedAvatar } from './photo-crop';
 
-type Room = { id: string; label: string; code?: string };
+type Room = { id: string; label: string; code?: string; photo?: string };
+
+function RoomAvatar({ room }: { room: Room }) {
+  const [image, setImage] = useState<{ path: string; url: string }>();
+  useEffect(() => {
+    const path = room.photo;
+    if (!path) return;
+    let active = true;
+    void resolveMedia(path).then(url => { if (active) setImage({ path, url }); }).catch(() => {});
+    return () => { active = false; };
+  }, [room.photo]);
+  const Icon = room.id === 'general' ? MessageSquare : room.id.startsWith('region:') ? MapPin : UsersRound;
+  return <span className="relative grid size-10 shrink-0 place-items-center overflow-hidden rounded-full bg-card text-primary" aria-hidden="true">
+    <Icon size={19} />
+    {image && image.path === room.photo && <img className="absolute inset-0 size-full object-cover" src={image.url} alt="" onError={() => setImage(undefined)} />}
+  </span>;
+}
+
+function RoomPhotoInput() {
+  const [file, setFile] = useState<File>();
+  const [preview, setPreview] = useState('');
+  useEffect(() => {
+    if (!file) { setPreview(''); return; }
+    const url = URL.createObjectURL(file);
+    setPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  return <div className="flex items-center gap-3">
+    <span className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-full bg-card text-primary">
+      {preview ? <img src={preview} alt="Aperçu de la photo du groupe" className="size-full object-cover" /> : <Camera size={23} aria-hidden="true" />}
+    </span>
+    <label className="grid min-w-0 flex-1 gap-1 text-sm">Photo du groupe (facultative)
+      <input className="w-full" type="file" name="photo" accept="image/*,.heic,.heif" onChange={event => setFile(event.currentTarget.files?.[0])} />
+    </label>
+  </div>;
+}
+
+async function prepareRoomPhoto(form: FormData) {
+  const file = form.get('photo');
+  if (!(file instanceof File) || !file.size) return null;
+  if (file.size > 30 * 1024 * 1024) throw new Error('Choisis une photo de moins de 30 Mo.');
+  return croppedAvatar(file, form);
+}
 
 export function ChatPage() {
-  const { user, records, add, refresh } = useCrew();
+  const { user, records, add, refresh, upload, name } = useCrew();
   const [selected, setSelected] = useState('');
+  const [menu, setMenu] = useState<'create' | 'photo'>();
   const [shared, setShared] = useState<{ userId: string; rooms: SharedRoom[] }>();
   const [busy, setBusy] = useState(false);
   const userId = user?.id;
@@ -27,38 +72,87 @@ export function ChatPage() {
   }, [userId]);
   const [joined, setJoined] = useState<string[]>([]);
   const region = user ? String(user.user_metadata['region'] ?? '') : 'Grand Est';
-  const rooms: Room[] = [
+  const covers = useMemo(() => {
+    const images = new Map<string, string>();
+    for (const record of records) {
+      const roomId = record.payload['room'];
+      const path = record.payload['roomCover'];
+      if (record.kind !== 'message' || typeof roomId !== 'string' || typeof path !== 'string') continue;
+      if (roomId.startsWith('room:') ? path.split('/').slice(1, 3).join('/') === 'rooms/' + roomId.slice(5) : path.startsWith('blob:')) {
+        images.set(roomId, path);
+      }
+    }
+    return images;
+  }, [records]);
+  const rooms: Room[] = ([
     { id: 'general', label: 'Général' },
     ...(frenchRegions.includes(region) ? [{ id: 'region:' + region, label: region }] : []),
     ...(userId && shared?.userId === userId ? shared.rooms.map(room => ({ ...room, id: 'room:' + room.id })) : []),
     ...(!user ? records.filter(record => record.kind === 'demo-room' && (joined.includes(record.id) || record.payload['createdHere'] === true)).map(record => ({
       id: record.id, label: String(record.payload['label']), code: String(record.payload['code']),
+      ...(typeof record.payload['photo'] === 'string' && record.payload['photo'].startsWith('blob:') ? { photo: record.payload['photo'] } : {}),
     })) : []),
-  ];
+  ] as Room[]).map(room => {
+    const photo = covers.get(room.id);
+    return photo ? { ...room, photo } : room;
+  });
   const current = rooms.find(room => room.id === selected);
+
+  async function saveCover(roomId: string, photo: Blob) {
+    const path = await upload(photo, 'jpg', roomId.startsWith('room:') ? 'rooms/' + roomId.slice(5) : undefined);
+    await add('message', {
+      room: roomId, roomCover: path, name, pilot: name.charAt(0), text: 'Photo du groupe mise à jour.',
+      time: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+    });
+  }
 
   async function createRoom(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
-    const label = String(new FormData(form).get('label') ?? '').trim();
+    const data = new FormData(form);
+    const label = String(data.get('label') ?? '').trim();
     if (!label || busy) return;
     setBusy(true);
     try {
+      const photo = await prepareRoomPhoto(data);
+      let group: string;
       if (userId) {
         const id = await socialCall('mybike_room_create', { room_label: label });
+        group = 'room:' + id;
         setShared({ userId, rooms: await socialCall('mybike_rooms_list', {}) });
-        setSelected('room:' + id);
       } else {
         const code = crypto.randomUUID().replaceAll('-', '').slice(0, 10).toUpperCase();
-        await add('demo-room', { label, code, createdHere: true });
+        await add('demo-room', { label, code, createdHere: true, ...(photo ? { photo: await upload(photo, 'jpg') } : {}) });
         toast.success('Groupe créé. Code de démo : ' + code);
+        setMenu(undefined);
+        return;
       }
-      form.reset();
+      if (photo) {
+        try { await saveCover(group, photo); }
+        catch { toast.error('Groupe créé. La photo pourra être ajoutée depuis la discussion.'); }
+      }
+      setSelected(group);
+      setMenu(undefined);
     } catch (error) {
       toast.error(String(error));
     } finally {
       setBusy(false);
     }
+  }
+
+  async function changeRoomPhoto(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!current?.code || busy) return;
+    const data = new FormData(event.currentTarget);
+    setBusy(true);
+    try {
+      const photo = await prepareRoomPhoto(data);
+      if (!photo) { toast.error('Choisis une photo.'); return; }
+      await saveCover(current.id, photo);
+      setMenu(undefined);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'La photo n’a pas été enregistrée.');
+    } finally { setBusy(false); }
   }
 
   async function joinRoom(event: FormEvent<HTMLFormElement>) {
@@ -90,20 +184,17 @@ export function ChatPage() {
 
   return (
     <CrewShell tab="Discussion" immersive={Boolean(current)}>
-      {current ? <Conversation key={current.id} room={current} onBack={() => setSelected('')} /> : (
+      {current ? <Conversation key={current.id} room={current} onBack={() => setSelected('')} onPhoto={() => setMenu('photo')} /> : (
         <div className="grid max-w-2xl gap-4">
           {rooms.map(room => (
-            <Button key={room.id} variant="outline" onClick={() => setSelected(room.id)} className="h-14 justify-start px-4">
-              {room.id === 'general' ? <MessageSquare /> : <MapPin />} {room.label}
+            <Button key={room.id} variant="outline" onClick={() => setSelected(room.id)} className="h-16 justify-start gap-3 px-3">
+              <RoomAvatar room={room} /><span className="truncate">{room.label}</span>
             </Button>
           ))}
             <section className="chat-panel grid gap-4 p-4">
               <h2 className="font-semibold">{user ? "Discussions par code" : "Groupes de démo"}</h2>
               {!user && <p className="text-sm text-muted-foreground">Les codes fonctionnent dans cette session de démo.</p>}
-              <form className="flex flex-wrap gap-2" onSubmit={createRoom}>
-                <input className="min-w-0 flex-1" name="label" aria-label="Nom du groupe" placeholder="Nom du groupe" maxLength={80} required />
-                <Button disabled={busy}>Créer une discussion</Button>
-              </form>
+              <Button className="justify-self-start" onClick={() => setMenu('create')}><Plus /> Créer un groupe</Button>
               <form className="flex flex-wrap gap-2" onSubmit={joinRoom}>
                 <input className="min-w-0 flex-1" name="code" aria-label="Code du groupe" placeholder="Code du groupe" required />
                 <Button disabled={busy} variant="secondary">Rejoindre une discussion</Button>
@@ -111,11 +202,24 @@ export function ChatPage() {
             </section>
         </div>
       )}
+      <Dialog open={Boolean(menu)} onOpenChange={open => { if (!open && !busy) setMenu(undefined); }}>
+        {menu && <DialogContent className="max-h-[90dvh] overflow-y-auto">
+          <DialogTitle>{menu === 'create' ? 'Créer un groupe' : 'Modifier la photo du groupe'}</DialogTitle>
+          <DialogDescription>{menu === 'create' ? 'Choisis un nom et une photo, puis partage le code du groupe.' : 'Les membres du groupe verront la nouvelle photo.'}</DialogDescription>
+          <form className="grid gap-4" onSubmit={menu === 'create' ? createRoom : changeRoomPhoto}>
+            {menu === 'create' && <label className="grid gap-1 text-sm">Nom du groupe
+              <input name="label" placeholder="Ex. Sorties du dimanche" maxLength={80} required />
+            </label>}
+            <RoomPhotoInput />
+            <Button disabled={busy}>{busy ? 'Enregistrement…' : menu === 'create' ? 'Créer le groupe' : 'Enregistrer la photo'}</Button>
+          </form>
+        </DialogContent>}
+      </Dialog>
     </CrewShell>
   );
 }
 
-function Conversation({ room, onBack }: { room: Room; onBack: () => void }) {
+function Conversation({ room, onBack, onPhoto }: { room: Room; onBack: () => void; onPhoto: () => void }) {
   const { records, add, name, upload, user } = useCrew();
   const [text, setText] = useState('');
   const [pollOpen, setPollOpen] = useState(false);
@@ -127,7 +231,7 @@ function Conversation({ room, onBack }: { room: Room; onBack: () => void }) {
   const feed = useRef<HTMLDivElement>(null);
   const voter = user?.id ?? 'demo';
   const entries = useMemo(() => records.filter(record =>
-    (record.kind === 'message' || record.kind === 'poll') &&
+    (record.kind === 'poll' || (record.kind === 'message' && !record.payload['roomCover'])) &&
     (record.payload['room'] ?? 'general') === room.id), [records, room.id]);
 
   useEffect(() => {
@@ -227,7 +331,9 @@ function Conversation({ room, onBack }: { room: Room; onBack: () => void }) {
     <section className="conversation-screen" aria-label="Conversation">
       <header className="flex flex-wrap items-center gap-3 border-b border-border p-4">
         <Button variant="ghost" size="icon" onClick={onBack} aria-label="Toutes les discussions"><ArrowLeft /></Button>
-        <h2 className="flex-1 text-lg font-semibold">{room.label}</h2>
+        <RoomAvatar room={room} />
+        <h2 className="min-w-0 flex-1 truncate text-lg font-semibold">{room.label}</h2>
+        {room.code && <Button variant="ghost" size="icon" onClick={onPhoto} aria-label="Modifier la photo du groupe"><Camera /></Button>}
         {room.code && <div className="flex items-center gap-2 text-sm">
           <span>Code <code className="select-all">{room.code}</code></span>
           <Button variant="ghost" size="icon" aria-label="Copier le code de la discussion" onClick={async () => {

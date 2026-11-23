@@ -57,3 +57,15 @@ describe('Vocaux dans les discussions', () => {
     expect(stopTrack).toHaveBeenCalled();
   });
 });
+
+it('opens the group configuration before creating a discussion', async () => {
+  add.mockClear();
+  render(<ChatPage />);
+  expect(screen.queryByRole('textbox', { name: 'Nom du groupe' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Créer un groupe' }));
+  expect(screen.getByRole('dialog', { name: 'Créer un groupe' })).toBeInTheDocument();
+  expect(screen.getByLabelText('Photo du groupe (facultative)')).toBeInTheDocument();
+  fireEvent.change(screen.getByRole('textbox', { name: 'Nom du groupe' }), { target: { value: 'Sorties moto' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Créer le groupe' }));
+  await waitFor(() => expect(add).toHaveBeenCalledWith('demo-room', expect.objectContaining({ label: 'Sorties moto' })));
+});
