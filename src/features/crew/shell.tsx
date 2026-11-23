@@ -1,11 +1,12 @@
 ﻿import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bike, Flag, House, Images, LockKeyhole, Map, MessageSquare, Radio, Settings, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
-import { useCrew } from './context';
+import { resolveMedia, useCrew } from './context';
 import { frenchRegions } from './regions';
 import { Friends } from './friends';
 
@@ -18,12 +19,27 @@ const tabs = [
   { to: '/medias', label: 'Médias', icon: Images },
 ] as const;
 
-export function Avatar({ pilot, size = '' }: { pilot: string; size?: string }) {
-  return <span className={`avatar-pilot ${size}`} data-pilot={pilot}>{pilot}</span>;
+export function Avatar({ pilot, size = '', userId }: { pilot: string; size?: string; userId?: string | null | undefined }) {
+  const { data: photo } = useQuery({
+    queryKey: ['profile-photo', userId],
+    enabled: Boolean(userId),
+    staleTime: 240000,
+    queryFn: async () => {
+      if (!userId) return null;
+      const { data, error } = await supabase.from('profiles').select('avatar_url').eq('id', userId).maybeSingle();
+      if (error) throw error;
+      if (!data?.avatar_url || !data.avatar_url.startsWith(userId + '/avatars/')) return null;
+      return resolveMedia(data.avatar_url);
+    },
+  });
+  return <span className={`avatar-pilot overflow-hidden ${size}`} data-pilot={pilot}>
+    {photo ? <img className="h-full w-full object-cover" src={photo} alt="" onError={event => { event.currentTarget.hidden = true; }} /> : pilot}
+  </span>;
 }
 
 export function CrewShell({ tab, children }: { tab: string; children: ReactNode }) {
-  const { user, firstName, loading } = useCrew();
+  const { user, firstName, loading, upload } = useCrew();
+  const queryClient = useQueryClient();
   const [auth, setAuth] = useState(false);
   const [register, setRegister] = useState(false);
   const [notice, setNotice] = useState('');
@@ -99,12 +115,25 @@ export function CrewShell({ tab, children }: { tab: string; children: ReactNode 
     const value = String(form.get('firstName') ?? '').trim();
     const selectedRegion = String(form.get('region') ?? '');
     const locality = String(form.get('locality') ?? '').trim();
+    const photo = form.get('avatar');
     if (!value || !frenchRegions.includes(selectedRegion)) {
       toast.error('Renseigne ton prénom et ta région.');
       return;
     }
     setBusy(true);
     try {
+      if (photo instanceof File && photo.size && user) {
+        const extensions: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+        const extension = extensions[photo.type];
+        if (!extension || photo.size > 5 * 1024 * 1024) {
+          toast.error('Choisis une photo JPEG, PNG ou WebP de moins de 5 Mo.');
+          return;
+        }
+        const avatar = await upload(photo, extension, 'avatars');
+        const { error } = await supabase.from('profiles').update({ avatar_url: avatar }).eq('id', user.id).select('id').single();
+        if (error) throw error;
+        void queryClient.invalidateQueries({ queryKey: ['profile-photo', user.id] });
+      }
       const { error } = await supabase.auth.updateUser({ data: { given_name: value, region: selectedRegion, locality } });
       if (error) throw error;
       if (settings) {
@@ -149,7 +178,7 @@ export function CrewShell({ tab, children }: { tab: string; children: ReactNode 
               <>
                 <Friends key={user.id} />
                 <Button variant="ghost" className="gap-1 px-1 sm:px-2" onClick={() => setSettings(true)} aria-label="Réglages du compte" title="Réglages du compte">
-                  {firstName && <Avatar pilot={firstName.charAt(0).toUpperCase()} />}
+                  {firstName && <Avatar pilot={firstName.charAt(0).toUpperCase()} userId={user.id} />}
                   <Settings />
                 </Button>
               </>
@@ -162,11 +191,11 @@ export function CrewShell({ tab, children }: { tab: string; children: ReactNode 
           </div>
         </div>
       </header>
-      <main className="app-width app-main pt-8 sm:pt-10">
-        {tab !== 'Accueil' && <h1 className="page-title mb-6">{tab}</h1>}
-        {loading && <p role="status" className="mb-3 text-sm text-muted-foreground">Synchronisation…</p>}
+      <main className={tab === 'Carte' ? 'app-map-main' : 'app-width app-main pt-8 sm:pt-10'}>
+        {tab !== 'Accueil' && tab !== 'Carte' && <h1 className="page-title mb-6">{tab}</h1>}
+        {loading && tab !== 'Carte' && <p role="status" className="mb-3 text-sm text-muted-foreground">Synchronisation…</p>}
         <div className="page-enter">{children}</div>
-        {!user && (
+        {!user && tab !== 'Carte' && (
           <footer className="app-footer flex items-center gap-2">
             <LockKeyhole size={13} /> Données fictives · modifications temporaires
           </footer>
@@ -214,6 +243,9 @@ export function CrewShell({ tab, children }: { tab: string; children: ReactNode 
           <DialogTitle className="font-display text-3xl">{settings ? 'Réglages du compte' : 'Ton profil MYbike'}</DialogTitle>
           <DialogDescription>{settings ? user?.email : 'Ta région détermine la discussion locale qui t’est proposée.'}</DialogDescription>
           <form onSubmit={saveFirstName} className="grid gap-4">
+            <label className="grid gap-2 text-sm">Photo de profil (facultative)
+              <input name="avatar" type="file" accept="image/jpeg,image/png,image/webp" />
+            </label>
             <label className="grid gap-2 text-sm">Prénom<input name="firstName" defaultValue={firstName} required maxLength={80} autoComplete="given-name" /></label>
             <label className="grid gap-2 text-sm">
               Région

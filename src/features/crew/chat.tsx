@@ -1,5 +1,5 @@
-﻿import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, BarChart3, Copy, MapPin, MessageSquare, Mic, Send, Square } from 'lucide-react';
+﻿import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { ArrowLeft, BarChart3, Copy, MapPin, MessageSquare, Mic, Send, Square, Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { resolveMedia, useCrew } from './context';
@@ -124,12 +124,18 @@ function Conversation({ room, talkie, onBack }: { room: Room; talkie: boolean; o
   const [recording, setRecording] = useState(false);
   const [micPending, setMicPending] = useState(false);
   const recorder = useRef<MediaRecorder | null>(null);
+  const held = useRef(false);
+  const micOpening = useRef(false);
+  const played = useRef(new Set<string>());
+  const playback = useRef<HTMLAudioElement>(null);
+  const [listening, setListening] = useState(false);
+  const [playbackBlocked, setPlaybackBlocked] = useState(false);
   const active = useRef(false);
   const feed = useRef<HTMLDivElement>(null);
   const voter = user?.id ?? 'demo';
-  const entries = records.filter(record =>
+  const entries = useMemo(() => records.filter(record =>
     (talkie ? record.kind === 'message' && typeof record.payload['audio'] === 'string' : record.kind === 'message' || record.kind === 'poll') &&
-    (record.payload['room'] ?? 'general') === room.id);
+    (record.payload['room'] ?? 'general') === room.id), [records, room.id, talkie]);
 
   useEffect(() => {
     active.current = true;
@@ -144,6 +150,55 @@ function Conversation({ room, talkie, onBack }: { room: Room; talkie: boolean; o
   useEffect(() => {
     if (feed.current) feed.current.scrollTop = feed.current.scrollHeight;
   }, [entries.length]);
+
+  useEffect(() => {
+    const player = playback.current;
+    if (!listening || !player || !user?.id) return;
+    let cancelled = false;
+    async function playNext() {
+      if (!player || cancelled) return;
+      const next = entries.find(entry => entry.author_id !== user?.id && !played.current.has(entry.id));
+      if (!next) return;
+      played.current.add(next.id);
+      try {
+        const url = await resolveMedia(String(next.payload['audio']));
+        if (cancelled) { played.current.delete(next.id); return; }
+        player.src = url;
+        await player.play();
+      } catch {
+        if (!cancelled) {
+          setPlaybackBlocked(true);
+          setListening(false);
+        }
+      }
+    }
+    player.addEventListener('ended', playNext);
+    if (player.paused) void playNext();
+    return () => { cancelled = true; player.removeEventListener('ended', playNext); };
+  }, [entries, listening, user?.id]);
+
+  function toggleListening() {
+    if (listening) {
+      playback.current?.pause();
+      setListening(false);
+      return;
+    }
+    played.current = new Set(entries.map(entry => entry.id));
+    setPlaybackBlocked(false);
+    setListening(true);
+  }
+
+  function releaseTalkie() {
+    held.current = false;
+    const current = recorder.current;
+    if (current?.state === 'recording') current.stop();
+  }
+
+  function holdTalkie() {
+    if (held.current || micOpening.current || recorder.current?.state === 'recording') return;
+    held.current = true;
+    void recordVoice();
+  }
 
   function post(body: Record<string, unknown>) {
     return add('message', {
@@ -185,11 +240,13 @@ function Conversation({ room, talkie, onBack }: { room: Room; talkie: boolean; o
       recorder.current.stop();
       return;
     }
+    if (micOpening.current) return;
+    micOpening.current = true;
     setMicPending(true);
     let stream: MediaStream | undefined;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      if (!active.current) {
+      if (!active.current || (talkie && !held.current)) {
         stream.getTracks().forEach(track => track.stop());
         return;
       }
@@ -203,7 +260,9 @@ function Conversation({ room, talkie, onBack }: { room: Room; talkie: boolean; o
         setRecording(false);
         try {
           const extension = capture.mimeType.includes('mp4') ? 'm4a' : capture.mimeType.includes('ogg') ? 'ogg' : 'webm';
-          const audio = await upload(new Blob(chunks, { type: capture.mimeType }), extension, room.id.startsWith('room:') ? 'rooms/' + room.id.slice(5) : undefined);
+          const clip = new Blob(chunks, { type: capture.mimeType });
+          if (!clip.size) return;
+          const audio = await upload(clip, extension, room.id.startsWith('room:') ? 'rooms/' + room.id.slice(5) : undefined);
           await post({ text: 'Message vocal', audio });
         } catch {
           toast.error('Le vocal n’a pas été envoyé.');
@@ -215,12 +274,13 @@ function Conversation({ room, talkie, onBack }: { room: Room; talkie: boolean; o
       stream?.getTracks().forEach(track => track.stop());
       toast.error('Microphone indisponible. Vérifie les autorisations.');
     } finally {
+      micOpening.current = false;
       if (active.current) setMicPending(false);
     }
   }
 
   return (
-    <section className="chat-panel max-w-3xl">
+    <section className={`chat-panel mx-auto max-w-3xl ${talkie ? 'flex flex-col' : ''}`}>
       <header className="flex flex-wrap items-center gap-3 border-b border-border p-4">
         <Button variant="ghost" size="icon" onClick={onBack} aria-label="Toutes les discussions"><ArrowLeft /></Button>
         <h2 className="flex-1 text-lg font-semibold">{room.label}</h2>
@@ -236,7 +296,12 @@ function Conversation({ room, talkie, onBack }: { room: Room; talkie: boolean; o
           }}><Copy /></Button>
         </div>}
       </header>
-      <div className="chat-feed" ref={feed}>
+      {talkie && user && <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2">
+        <Button variant={listening ? 'default' : 'outline'} aria-pressed={listening} onClick={toggleListening}><Volume2 /> {listening ? 'Lecture auto activée' : 'Activer la lecture auto'}</Button>
+        <span className="text-sm text-muted-foreground">{playbackBlocked ? 'Lecture bloquée par le navigateur. Touche un vocal pour l’écouter.' : 'Garde ce salon ouvert pour entendre les nouveaux vocaux.'}</span>
+        <audio ref={playback} />
+      </div>}
+      <div className={`chat-feed ${talkie ? 'order-last min-h-36 border-t border-border' : ''}`} ref={feed}>
         {!entries.length && <p className="text-muted-foreground">{talkie ? 'Aucun vocal pour le moment.' : 'Aucun message pour le moment.'}</p>}
         {entries.map(record => {
           if (record.kind === 'poll') {
@@ -261,22 +326,41 @@ function Conversation({ room, talkie, onBack }: { room: Room; talkie: boolean; o
             );
           }
           const message = record.payload as unknown as Message;
+          const own = user ? record.author_id === user.id : message.name === name;
           return (
-            <div key={record.id} className="mb-4 flex gap-3">
-              <Avatar pilot={message.pilot} />
-              <div className="min-w-0">
-                <p className="mb-1 text-xs">{message.name} · {message.time}</p>
-                <div className="bubble break-words">{message.audio ? <VoiceMessage path={message.audio} /> : message.text}</div>
+            <div key={record.id} className={`mb-4 flex items-end gap-2 ${own ? 'flex-row-reverse' : ''}`}>
+              <Avatar pilot={message.pilot} userId={record.author_id} />
+              <div className={`min-w-0 max-w-[80%] ${own ? 'text-right' : ''}`}>
+                <p className="mb-1 text-xs text-muted-foreground">{own ? 'Toi' : message.name} · {message.time}</p>
+                <div className={`bubble max-w-full break-words text-left ${own ? 'bubble-own' : ''}`}>{message.audio ? <VoiceMessage path={message.audio} /> : message.text}</div>
               </div>
             </div>
           );
         })}
       </div>
-      <div className="border-t border-border p-3">
+      <div className={talkie ? 'grid justify-items-center gap-2 p-6' : 'border-t border-border p-3'}>
         {talkie ? (
-          <Button type="button" className="h-12 w-full" disabled={micPending} onClick={recordVoice}>
+          <Button type="button" variant={recording ? 'default' : 'outline'} className="min-h-24 w-full max-w-72 touch-none select-none rounded-full text-base" aria-pressed={recording}
+            onContextMenu={event => event.preventDefault()}
+            onPointerDown={event => {
+              if (event.button !== 0) return;
+              event.currentTarget.setPointerCapture(event.pointerId);
+              holdTalkie();
+            }}
+            onPointerUp={releaseTalkie} onPointerCancel={releaseTalkie} onLostPointerCapture={releaseTalkie}
+            onKeyDown={event => {
+              if (event.key !== ' ' && event.key !== 'Enter') return;
+              event.preventDefault();
+              if (!event.repeat) holdTalkie();
+            }}
+            onKeyUp={event => {
+              if (event.key !== ' ' && event.key !== 'Enter') return;
+              event.preventDefault();
+              releaseTalkie();
+            }}
+            onBlur={releaseTalkie}>
             {recording ? <Square /> : <Mic />}
-            {micPending ? 'Ouverture du micro…' : recording ? 'Arrêter et envoyer le vocal' : 'Enregistrer un vocal'}
+            {micPending ? 'Ouverture du micro…' : recording ? 'Relâche pour envoyer' : 'Maintiens pour parler'}
           </Button>
         ) : <form className="flex items-center gap-2" onSubmit={send}>
           <input className="w-0 flex-1" aria-label="Ton message" placeholder="Écris un message…" value={text} onChange={event => setText(event.target.value)} />

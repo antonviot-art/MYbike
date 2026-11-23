@@ -260,3 +260,11 @@ input:focus, textarea:focus { outline: 1px solid var(--primary); }
 .chat-panel, .vehicle-grid article, .map-canvas { border-radius: 20px; }
 .media-photo { border-radius: 16px; }
 @media (max-width: 380px) { .nav-item { font-size: 10px; } }
+
+.app-map-main .page-enter { animation: none; }
+.map-screen { position: relative; height: calc(100dvh - 74px); min-height: 330px; }
+.map-screen .map-canvas { height: 100%; border-radius: 0; }
+.map-tools { position: absolute; top: 12px; right: 12px; display: grid; gap: 6px; z-index: 2; }
+.map-tools > * { box-shadow: 0 2px 8px var(--overlay); }
+.map-status { position: absolute; bottom: calc(84px + env(safe-area-inset-bottom)); left: 12px; right: 12px; width: fit-content; max-width: calc(100% - 24px); padding: 10px 12px; display: grid; gap: 6px; border-radius: 14px; background: var(--secondary); font-size: .875rem; z-index: 2; }
+.map-screen .leaflet-bottom { bottom: calc(76px + env(safe-area-inset-bottom)); }

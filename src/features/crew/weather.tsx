@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react';
+﻿import { useCallback, useEffect, useState } from 'react';
 import { CloudRain, CloudSun, Droplets, LocateFixed, MapPin, Wind } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -49,21 +49,31 @@ export function Weather({ demo }: { demo: boolean }) {
     return () => controller.abort();
   }, [place]);
 
-  function locate() {
+  const locate = useCallback((showError = true) => {
     setError('');
     if (!navigator.geolocation) {
-      setError('Ton navigateur ne propose pas la localisation.');
+      if (showError) setError('Ton navigateur ne propose pas la localisation.');
       return;
     }
     setLocating(true);
     navigator.geolocation.getCurrentPosition(({ coords }) => {
-      setLocalPlace({ lat: Number(coords.latitude.toFixed(2)), lng: Number(coords.longitude.toFixed(2)), label: 'Autour de toi' });
+      const next = { lat: Number(coords.latitude.toFixed(2)), lng: Number(coords.longitude.toFixed(2)), label: 'Autour de toi' };
+      setLocalPlace(next);
+      try { localStorage.setItem('mybike:weather-location', JSON.stringify(next)); } catch { /* Still available in memory. */ }
       setLocating(false);
     }, () => {
-      setError('Position indisponible. Vérifie les autorisations de localisation du navigateur.');
+      if (showError) setError('Position indisponible. Vérifie les autorisations de localisation du navigateur.');
       setLocating(false);
     }, { timeout: 10000, maximumAge: 60000 });
-  }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('mybike:weather-location') ?? 'null') as Place | null;
+      if (saved && Number.isFinite(saved.lat) && Number.isFinite(saved.lng)) setLocalPlace(saved);
+    } catch { /* A fresh position is requested below. */ }
+    locate(false);
+  }, [locate]);
 
   return (
     <div className="grid gap-3">
@@ -74,7 +84,7 @@ export function Weather({ demo }: { demo: boolean }) {
             <h2 id="weather-title" className="text-xl font-semibold">Météo du jour</h2>
             {place && <p className="mt-1 flex items-center gap-1 text-sm text-muted-foreground"><MapPin size={14} aria-hidden="true" /> {place.label}</p>}
           </div>
-          <Button variant="outline" disabled={locating} onClick={locate}><LocateFixed /> {locating ? 'Localisation…' : 'Ma météo locale'}</Button>
+          <Button variant="outline" disabled={locating} onClick={() => locate()}><LocateFixed /> {locating ? 'Localisation…' : 'Actualiser ma position'}</Button>
         </div>
         {reading ? (
           <>

@@ -1,13 +1,103 @@
-﻿import { lazy, Suspense, useCallback, useState } from 'react';
+﻿import { lazy, Suspense, useState, type FormEvent } from 'react';
 import { ClientOnly } from '@tanstack/react-router';
-import { Navigation, Upload, MapPin, Route, Plus, X } from 'lucide-react';
+import { Navigation, Upload, MapPin, Route, LocateFixed, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { CrewShell } from './shell';
 import { useCrew } from './context';
-import { useLiveLocation } from './live-location';
 import { readGpx } from './data';
 import { toast } from 'sonner';
-const MapView=lazy(()=>import('./map-view'));
-export function MapPage(){const {records,add,name,user}=useCrew(); const [sharing,setSharing]=useState(false); const stopSharing=useCallback(()=>setSharing(false),[]); const now=useLiveLocation(user?.id,name,sharing,stopSharing);const [focus,setFocus]=useState(0); const [points,setPoints]=useState<[number,number][]>([]);const [drawing,setDrawing]=useState(false);const [mark,setMark]=useState(false);const markers=[...(!user?[{lat:48.065,lng:6.863,label:'Rendez-vous de démo · Parking du lac',live:false}]:[]),...records.filter(r=>r.kind==='marker'||(user&&now&&r.kind==='live-position'&&Number(r.payload['expires'])>now)).map(r=>({lat:Number(r.payload['lat']),lng:Number(r.payload['lng']),label:String(r.payload['label']),live:r.kind==='live-position'}))];
- return <CrewShell tab="Carte"><div className="flex flex-wrap items-center justify-between gap-3 mb-5"><div><h2 className="font-semibold flex items-center gap-2"><MapPin className="text-primary" size={19}/>Carte des sorties</h2><p className="text-xs text-muted-foreground mt-1">Chemins, spots et rendez-vous du groupe</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" asChild><label className="cursor-pointer"><Upload/>Importer GPX<input className="hidden" type="file" accept=".gpx" onChange={async e=>{const f=e.target.files?.[0];if(!f)return;try{setPoints(readGpx(await f.text()));toast.success('Trace GPX importée')}catch(e){toast.error(String(e))}}}/></label></Button><Button variant={drawing?'default':'outline'} onClick={()=>{setDrawing(!drawing);setMark(false)}}><Route/>{drawing?'Terminer':'Tracer'}</Button><Button variant={mark?'default':'outline'} onClick={()=>{setMark(!mark);setDrawing(false)}}><Plus/>Repère</Button></div></div>{(drawing||mark)&&<div className="flex justify-between items-center mb-3 text-sm text-primary">{drawing?'Ajoutez les étapes sur la carte.':'Choisissez un point sur la carte.'}<Button variant="ghost" size="icon" onClick={()=>{setDrawing(false);setMark(false)}}><X/></Button></div>}<ClientOnly fallback={<div className="map-canvas bg-secondary grid place-items-center text-muted-foreground">Chargement de la carte…</div>}><Suspense fallback={<div className="map-canvas bg-secondary"/>}><MapView points={points} markers={markers} focus={focus} onPoint={(lat,lng)=>{if(drawing)setPoints(p=>[...p,[lat,lng]]);if(mark){const label=window.prompt('Nom du repère (spot, pause, rendez-vous…)');if(label)void add('marker',{lat,lng,label}).catch(e=>toast.error(String(e)));setMark(false)}}}/></Suspense></ClientOnly><div className="flex flex-wrap items-center justify-between gap-4 mt-5"><span className="text-sm text-muted-foreground">{points.length?`${points.length} points dans votre parcours`:`${markers.length} repère partagé`}</span><div className="flex flex-wrap gap-2">{points.length>1&&<Button variant="outline" onClick={()=>void add('route',{points,name:'Parcours du groupe'}).then(()=>toast.success('Parcours partagé')).catch(e=>toast.error(String(e)))}>Partager le parcours</Button>}{markers.some(marker=>marker.live) && <Button variant="outline" onClick={()=>setFocus(value=>value+1)}>Voir les positions</Button>}{user && <Button aria-pressed={sharing} onClick={()=>{if(!navigator.geolocation){toast.error('Position indisponible');return;}setSharing(!sharing)}}><Navigation/>{sharing?'Arrêter le partage':'Partager ma position en direct'}</Button>}</div></div>{records.filter(r=>r.kind==='route').map(r=><Button key={r.id} variant="link" onClick={()=>setPoints(r.payload['points'] as [number,number][])}><Route/>{String(r.payload['name'])}</Button>)}{user && <p className="text-sm text-muted-foreground mt-4">La position est visible par les membres connectés pendant le partage sur cet écran.</p>}<p className="text-xs text-muted-foreground mt-5">Fond de carte en ligne · cartes hors-ligne non disponibles dans cette première version.</p></CrewShell>;
+
+const MapView = lazy(() => import('./map-view'));
+type Point = [number, number];
+
+export function MapPage() {
+  const { records, add, user, sharing, setSharing, positionClock } = useCrew();
+  const [focus, setFocus] = useState(0);
+  const [points, setPoints] = useState<Point[]>([]);
+  const [mode, setMode] = useState<'draw' | 'mark'>();
+  const [pin, setPin] = useState<Point>();
+  const [saving, setSaving] = useState(false);
+  const markers = [
+    ...(!user ? [{ lat: 48.065, lng: 6.863, label: 'Parking du lac · Démo', live: false }] : []),
+    ...records.filter(record => record.kind === 'marker' || (record.kind === 'live-position' &&
+      positionClock > 0 && Number(record.payload['expires']) > positionClock)).map(record => ({
+      lat: Number(record.payload['lat']), lng: Number(record.payload['lng']),
+      label: String(record.payload['label']), live: record.kind === 'live-position',
+    })),
+  ];
+  const sharedRoutes = records.filter(record => record.kind === 'route');
+
+  async function savePin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!pin || saving) return;
+    const label = String(new FormData(event.currentTarget).get('label') ?? '').trim();
+    if (!label) return;
+    setSaving(true);
+    try {
+      await add('marker', { lat: pin[0], lng: pin[1], label });
+      setPin(undefined);
+    } catch {
+      toast.error('Impossible d’ajouter le repère.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <CrewShell tab="Carte">
+      <section className="map-screen" aria-label="Carte des sorties">
+        <ClientOnly fallback={<div className="map-canvas bg-secondary grid place-items-center">Chargement de la carte…</div>}>
+          <Suspense fallback={<div className="map-canvas bg-secondary" />}>
+            <MapView points={points} markers={markers} focus={focus} onPoint={(lat, lng) => {
+              if (mode === 'draw') setPoints(current => [...current, [lat, lng]]);
+              if (mode === 'mark') { setPin([lat, lng]); setMode(undefined); }
+            }} />
+          </Suspense>
+        </ClientOnly>
+        <div className="map-tools" aria-label="Outils de la carte">
+          {user && <Button size="icon" aria-pressed={sharing} variant={sharing ? 'default' : 'secondary'} aria-label={sharing ? 'Arrêter le partage de position' : 'Partager ma position'} title={sharing ? 'Arrêter le partage' : 'Partager ma position'} onClick={() => {
+            if (!navigator.geolocation) { toast.error('Position indisponible.'); return; }
+            setSharing(!sharing);
+          }}><Navigation /></Button>}
+          <Button size="icon" variant="secondary" title="Voir les positions" aria-label="Voir les positions" disabled={!markers.some(marker => marker.live)} onClick={() => setFocus(value => value + 1)}><LocateFixed /></Button>
+          <Button size="icon" variant="secondary" title="Importer GPX" asChild><label className="cursor-pointer">
+            <Upload /><span className="sr-only">Importer GPX</span>
+            <input className="sr-only" type="file" accept=".gpx" onChange={async event => {
+              const file = event.currentTarget.files?.[0];
+              event.currentTarget.value = '';
+              if (!file) return;
+              try { setPoints(readGpx(await file.text())); setMode(undefined); }
+              catch (error) { toast.error(String(error)); }
+            }} />
+          </label></Button>
+          <Button size="icon" aria-pressed={mode === 'draw'} variant={mode === 'draw' ? 'default' : 'secondary'} title="Tracer" aria-label="Tracer" onClick={() => setMode(mode === 'draw' ? undefined : 'draw')}><Route /></Button>
+          <Button size="icon" aria-pressed={mode === 'mark'} variant={mode === 'mark' ? 'default' : 'secondary'} title="Ajouter un repère" aria-label="Ajouter un repère" onClick={() => setMode(mode === 'mark' ? undefined : 'mark')}><MapPin /></Button>
+          {points.length > 1 && <Button size="icon" variant="secondary" title="Partager le parcours" aria-label="Partager le parcours" onClick={() => void add('route', { points, name: 'Parcours du groupe' })
+            .then(() => toast.success('Parcours partagé.')).catch(() => toast.error('Le parcours n’a pas été partagé.'))}><Share2 /></Button>}
+        </div>
+        {(mode || sharing || sharedRoutes.length > 0) && <div className="map-status">
+          {sharing && <p>Position partagée avec les membres connectés.</p>}
+          {mode && <p>{mode === 'draw' ? 'Touche la carte pour tracer ton parcours.' : 'Touche la carte pour placer le repère.'}</p>}
+          {sharedRoutes.length > 0 && <select aria-label="Parcours partagés" value="" onChange={event => {
+            const record = sharedRoutes.find(item => item.id === event.target.value);
+            if (record) setPoints(record.payload['points'] as Point[]);
+          }}>
+            <option value="" disabled>Parcours partagés</option>
+            {sharedRoutes.map((record, index) => <option key={record.id} value={record.id}>{String(record.payload['name'])} · {index + 1}</option>)}
+          </select>}
+        </div>}
+      </section>
+      <Dialog open={Boolean(pin)} onOpenChange={open => { if (!open) setPin(undefined); }}>
+        <DialogContent>
+          <DialogTitle>Ajouter un repère</DialogTitle>
+          <DialogDescription>Donne un nom à cet endroit sur la carte.</DialogDescription>
+          <form className="grid gap-3" onSubmit={savePin}>
+            <input name="label" placeholder="Ex. Rendez-vous au parking" aria-label="Nom du repère" maxLength={80} required />
+            <Button disabled={saving}>Enregistrer le repère</Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </CrewShell>
+  );
 }

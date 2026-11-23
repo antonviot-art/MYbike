@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 export function useLiveLocation(userId: string | undefined, name: string, enabled: boolean, stop: () => void) {
   useEffect(() => {
     if (!userId || !enabled) return;
+    if (!navigator.geolocation) { stop(); return; }
     const authorId = userId;
     let active = true;
     let recordId: string | undefined;
@@ -44,6 +45,7 @@ export function useLiveLocation(userId: string | undefined, name: string, enable
       position = value;
       void publish();
     }, () => {
+      if (!active) return;
       toast.error('Position indisponible. Vérifie les autorisations de localisation.');
       stop();
     }, { maximumAge: 5000, timeout: 15000 });

@@ -1,11 +1,11 @@
-import ride from '@/assets/crew-ride.asset.json';
+﻿import ride from '@/assets/crew-ride.asset.json';
 import red from '@/assets/red-bike.asset.json';
 import orange from '@/assets/orange-bike.asset.json';
 import quad from '@/assets/quad.asset.json';
 export const images: Record<string,string> = { ride: ride.url, red: red.url, orange: orange.url, quad: quad.url };
 export type Message = { name: string; text: string; time: string; pilot: string; audio?: string };
 export type Vehicle = { name: string; owner: string; pilot: string; cc: number; type: string; image: string; hours: number; km: number; maintenance: string[]; alert: string };
-export type CrewRecord = { id: string; kind: string; payload: Record<string,unknown> };
+export type CrewRecord = { id: string; kind: string; author_id?: string | null; payload: Record<string,unknown> };
 export const demoRecords: CrewRecord[] = [
 ...[
 { name: 'Maxime', text: 'Qui est chaud pour une sortie dimanche dans les Vosges ? 🏍️', time: '18:32', pilot: 'M' },
