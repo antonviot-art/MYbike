@@ -287,3 +287,29 @@ input:focus, textarea:focus { outline: 1px solid var(--primary); }
 .map-share-tip svg { flex: none; color: var(--primary); }
 .ride-speed { display: flex; align-items: baseline; gap: 8px; width: fit-content; padding: 10px 16px; border-radius: 16px; background: var(--card); }
 .ride-speed svg { align-self: center; margin-right: 4px; color: var(--primary); }
+
+.home-hero .home-hero-profile { display: none; }
+@media (max-width: 640px) {
+  .home-hero .home-hero-scene { object-fit: contain; object-position: top center; }
+  .home-hero.has-profile-hero { min-height: 290px; text-align: center; justify-items: center; }
+  .home-hero.has-profile-hero .home-hero-scene { display: none; }
+  .home-hero.has-profile-hero .home-hero-profile {
+    display: block; inset: 16px 0 auto; width: min(66%, 224px); height: 190px;
+    margin-inline: auto; object-fit: contain; object-position: center; border-radius: 18px;
+  }
+  .home-hero.has-profile-hero::after { background: linear-gradient(0deg, var(--secondary) 10%, transparent 45%); }
+  .vehicle-edit-actions { position: sticky; bottom: calc(77px + env(safe-area-inset-bottom)); z-index: 3; padding: 10px; border-radius: 12px; background: var(--secondary); box-shadow: 0 -4px 18px var(--overlay); }
+}
+.ride-speed > span:nth-child(2) { font-size: 2.8rem; line-height: 1; }
+.ride-dashboard { position: fixed; inset: 0; z-index: 45; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; background: var(--background); }
+.ride-dashboard .track-map { height: 100%; min-height: 0; }
+.ride-dashboard .map-canvas { border-radius: 0; }
+.ride-dashboard-stats { display: grid; justify-items: center; gap: 10px; padding: max(14px, env(safe-area-inset-top)) 14px 14px; background: var(--secondary); }
+.ride-dashboard-stats > button:first-child { justify-self: start; }
+.ride-dashboard .ride-speed { background: transparent; }
+.ride-dashboard .ride-speed > span:nth-child(2) { font-size: clamp(4rem, 16vmin, 8rem); }
+@media (orientation: landscape) {
+  .ride-dashboard { grid-template: minmax(0, 1fr) / minmax(190px, 34%) minmax(0, 1fr); }
+  .ride-dashboard-stats { align-content: center; overflow-y: auto; }
+  .ride-dashboard .ride-speed > span:nth-child(2) { font-size: clamp(4rem, 11vw, 8rem); }
+}

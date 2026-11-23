@@ -1,6 +1,6 @@
 ﻿import { lazy, Suspense, useState, type FormEvent } from 'react';
 import { ClientOnly } from '@tanstack/react-router';
-import { ArrowRight, Navigation, Upload, MapPin, Route, LocateFixed, Share2 } from 'lucide-react';
+import { ArrowRight, Layers, Navigation, Upload, MapPin, Route, LocateFixed, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { CrewShell } from './shell';
@@ -12,7 +12,7 @@ const MapView = lazy(() => import('./map-view'));
 type Point = [number, number];
 
 export function MapPage() {
-  const { records, add, user, sharing, setSharing, positionClock } = useCrew();
+  const { records, add, user, sharing, setSharing, positionClock, aerial, setAerial } = useCrew();
   const [focus, setFocus] = useState(0);
   const [points, setPoints] = useState<Point[]>([]);
   const [mode, setMode] = useState<'draw' | 'mark'>();
@@ -65,6 +65,7 @@ export function MapPage() {
             setSharing(!sharing);
           }}><Navigation /></Button>}
           <Button size="icon" variant="secondary" title="Voir les positions" aria-label="Voir les positions" disabled={!markers.some(marker => marker.live)} onClick={() => setFocus(value => value + 1)}><LocateFixed /></Button>
+          <Button size="icon" variant={aerial ? 'default' : 'secondary'} title={aerial ? 'Vue plan' : 'Vue satellite'} aria-label={aerial ? 'Afficher le plan' : 'Afficher la vue satellite'} aria-pressed={aerial} onClick={() => setAerial(!aerial)}><Layers /></Button>
           <Button size="icon" variant="secondary" title="Importer GPX" asChild><label className="cursor-pointer">
             <Upload /><span className="sr-only">Importer GPX</span>
             <input className="sr-only" type="file" accept=".gpx" onChange={async event => {

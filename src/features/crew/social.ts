@@ -10,6 +10,9 @@ type Functions = {
   mybike_friends_list: { params: Record<string, never>; result: Friend[] };
   mybike_friend_request: { params: { friend_id: string }; result: null };
   mybike_friend_accept: { params: { friend_id: string }; result: null };
+  mybike_friend_code: { params: Record<string, never>; result: string };
+  mybike_friend_request_code: { params: { friend_code: string }; result: 'ok' | 'invalid' | 'rate' };
+  mybike_ride_edit: { params: { ride_id: string; ride_name: string; ride_description: string }; result: null };
 };
 
 export async function socialCall<Key extends keyof Functions>(name: Key, args: Functions[Key]['params']): Promise<Functions[Key]['result']> {

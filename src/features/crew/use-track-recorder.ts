@@ -10,6 +10,7 @@ export function useTrackRecorder(key: string) {
   const [recording, setRecording] = useState(false);
   const [accuracy, setAccuracy] = useState<number>();
   const [speed, setSpeed] = useState<number>();
+  const [position, setPosition] = useState<{ point: TrackPoint; accuracy: number }>();
   const data = useRef<TrackPoint[][]>([]);
   const durationRef = useRef(0);
   const started = useRef(0);
@@ -50,6 +51,7 @@ export function useTrackRecorder(key: string) {
     setRecording(true);
     setAccuracy(undefined);
     setSpeed(undefined);
+    setPosition(undefined);
 
     async function keepScreenOn() {
       if (!active || document.hidden || (wake && !wake.released)) return;
@@ -64,12 +66,13 @@ export function useTrackRecorder(key: string) {
 
     const watch = navigator.geolocation.watchPosition(({ coords, timestamp }) => {
       if (!active) return;
+      const point: TrackPoint = [coords.latitude, coords.longitude];
+      if (Number.isFinite(coords.accuracy)) setPosition({ point, accuracy: coords.accuracy });
       setAccuracy(Math.round(coords.accuracy));
       if (coords.accuracy > 35 || !Number.isFinite(coords.accuracy) || timestamp <= lastTime) {
         setSpeed(undefined);
         return;
       }
-      const point: TrackPoint = [coords.latitude, coords.longitude];
       const gap = timestamp - lastTime > 30000;
       const reportedSpeed = coords.speed;
       const hasSpeed = reportedSpeed != null && Number.isFinite(reportedSpeed) && reportedSpeed >= 0 && reportedSpeed <= 70;
@@ -137,8 +140,9 @@ export function useTrackRecorder(key: string) {
     setSegments([]);
     setDuration(0);
     setAccuracy(undefined);
+    setPosition(undefined);
     try { localStorage.removeItem(key); } catch { /* Draft already cleared in memory. */ }
   }
 
-  return { segments, distance: trackDistance(segments), duration, recording, accuracy, speed, start, stop, clear };
+  return { segments, distance: trackDistance(segments), duration, recording, accuracy, speed, position, start, stop, clear };
 }

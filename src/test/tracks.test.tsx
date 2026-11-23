@@ -25,6 +25,7 @@ it('keeps a GPS draft, rejects weak fixes and does not connect gaps in reception
     } as GeolocationPosition));
     fix(10000, 48, 8, 10);
     expect(first.result.current.speed).toBe(36);
+    expect(first.result.current.position).toEqual({ point: [48, 4.5], accuracy: 8 });
     fix(15000, 49, 120);
     expect(first.result.current.speed).toBeUndefined();
     fix(20000, 48.001, 8);

@@ -12,6 +12,7 @@ export function Friends() {
   const [friends, setFriends] = useState<Friend[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [shortCode, setShortCode] = useState('');
   const userId = user?.id;
 
   async function load() {
@@ -22,6 +23,7 @@ export function Friends() {
   useEffect(() => {
     if (!open || !userId) return;
     let active = true;
+    void socialCall('mybike_friend_code', {}).then(code => { if (active) setShortCode(code); }).catch(() => {});
     const check = () => void socialCall('mybike_friends_list', {}).then(items => {
       if (active) { setFriends(items); setError(''); }
     }).catch(error => { if (active) setError(error.message); });
@@ -50,15 +52,32 @@ export function Friends() {
   async function request(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
-    const code = String(new FormData(form).get('code') ?? '').trim();
-    if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(code)) {
-      setError('Vérifie le code ami et copie-le en entier.');
+    const code = String(new FormData(form).get('code') ?? '').trim().toUpperCase();
+    if (/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(code)) {
+      if (await change(code, false)) form.reset();
       return;
     }
-    if (await change(code, false)) form.reset();
+    if (!/^[A-Z2-9]{5}$/.test(code)) {
+      setError('Le nouveau code ami comporte cinq caractères.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const result = await socialCall('mybike_friend_request_code', { friend_code: code });
+      if (result !== 'ok') throw new Error(result === 'rate' ? 'Trop d’essais. Réessaie dans une minute.' : 'Code ami inconnu.');
+      await load();
+      form.reset();
+      toast.success('Demande envoyée.');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Action impossible.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (!userId) return null;
+  const displayCode = shortCode || userId;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -67,9 +86,9 @@ export function Friends() {
         <DialogTitle>Mes amis</DialogTitle>
         <DialogDescription>Partage ton code ami ou saisis celui d’un autre membre.</DialogDescription>
         <label className="grid gap-1 text-sm">Mon code ami
-          <input readOnly value={userId} onFocus={event => event.currentTarget.select()} />
+          <input readOnly value={displayCode} onFocus={event => event.currentTarget.select()} />
         </label>
-        <Button variant="outline" onClick={() => void navigator.clipboard.writeText(userId).then(() => toast.success('Code ami copié.')).catch(() => toast.error('Sélectionne le code pour le copier manuellement.'))}><Copy /> Copier</Button>
+        <Button variant="outline" onClick={() => void navigator.clipboard.writeText(displayCode).then(() => toast.success('Code ami copié.')).catch(() => toast.error('Sélectionne le code pour le copier manuellement.'))}><Copy /> Copier</Button>
         <form onSubmit={request} className="grid gap-2">
           <label className="grid gap-1 text-sm">Code de ton ami<input name="code" required maxLength={40} autoComplete="off" /></label>
           <Button disabled={busy}>Envoyer une demande</Button>

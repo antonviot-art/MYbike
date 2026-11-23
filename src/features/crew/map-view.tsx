@@ -1,8 +1,9 @@
 ﻿import { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { useCrew } from './context';
 
-type Marker = { lat: number; lng: number; label: string; live?: boolean };
+type Marker = { lat: number; lng: number; label: string; live?: boolean; current?: boolean; accuracy?: number };
 
 export default function MapView({ points, segments, markers, focus, onPoint }: {
   points: [number, number][];
@@ -12,6 +13,7 @@ export default function MapView({ points, segments, markers, focus, onPoint }: {
   onPoint: (lat: number, lng: number) => void;
 }) {
   const el = useRef<HTMLDivElement>(null);
+  const { aerial } = useCrew();
   const map = useRef<L.Map>(null);
   const layer = useRef<L.LayerGroup>(null);
   const callback = useRef(onPoint);
@@ -23,11 +25,29 @@ export default function MapView({ points, segments, markers, focus, onPoint }: {
     if (!el.current) return;
     const instance = L.map(el.current).setView([48.067, 6.862], 12);
     map.current = instance;
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap contributors', maxZoom: 19 }).addTo(instance);
     layer.current = L.layerGroup().addTo(instance);
     instance.on('click', event => callback.current(event.latlng.lat, event.latlng.lng));
     return () => { instance.remove(); map.current = null; };
   }, []);
+
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+    const url = aerial
+      ? 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image%2Fjpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}'
+      : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+    const tiles = L.tileLayer(url, {
+      attribution: aerial ? 'Vue aérienne © IGN · © OpenStreetMap contributors' : '© OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(instance);
+    if (aerial) tiles.on('tileerror', (event: L.TileErrorEvent) => {
+      const image = event.tile as HTMLImageElement;
+      if (image.src.includes('openstreetmap.org')) return;
+      const { x, y, z } = event.coords;
+      image.src = 'https://tile.openstreetmap.org/' + z + '/' + x + '/' + y + '.png';
+    });
+    return () => { tiles.remove(); };
+  }, [aerial]);
 
   useEffect(() => {
     const group = layer.current;
@@ -40,6 +60,12 @@ export default function MapView({ points, segments, markers, focus, onPoint }: {
       if (!Number.isFinite(marker.lat) || !Number.isFinite(marker.lng)) continue;
       const label = document.createElement('span');
       label.textContent = marker.label;
+      if (marker.current) {
+        const center: L.LatLngTuple = [marker.lat, marker.lng];
+        if (marker.accuracy) L.circle(center, { radius: Math.min(150, marker.accuracy), color: '#60a5fa', weight: 1, fillOpacity: 0.16 }).addTo(group);
+        L.circleMarker(center, { radius: 8, color: 'white', fillColor: '#2563eb', fillOpacity: 1, weight: 3 }).bindPopup(label).addTo(group);
+        continue;
+      }
       const options = { radius: 8, color: marker.live ? liveColor : color, fillOpacity: 0.7, weight: 3 };
       L.circleMarker([marker.lat, marker.lng], options).bindPopup(label).addTo(group);
     }

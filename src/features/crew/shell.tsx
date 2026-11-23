@@ -9,6 +9,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { resolveMedia, useCrew } from './context';
 import { frenchRegions } from './regions';
 import { Friends } from './friends';
+import { AvatarCropFields, croppedAvatar } from './photo-crop';
 
 const tabs = [
   { to: '/', label: 'Accueil', icon: House },
@@ -19,8 +20,8 @@ const tabs = [
   { to: '/medias', label: 'Médias', icon: Images },
 ] as const;
 
-export function Avatar({ pilot, size = '', userId }: { pilot: string; size?: string; userId?: string | null | undefined }) {
-  const { data: photo } = useQuery({
+export function useProfilePhoto(userId?: string | null | undefined) {
+  return useQuery({
     queryKey: ['profile-photo', userId],
     enabled: Boolean(userId),
     staleTime: 240000,
@@ -31,7 +32,11 @@ export function Avatar({ pilot, size = '', userId }: { pilot: string; size?: str
       if (!data?.avatar_url || !data.avatar_url.startsWith(userId + '/avatars/')) return null;
       return resolveMedia(data.avatar_url);
     },
-  });
+  }).data;
+}
+
+export function Avatar({ pilot, size = '', userId }: { pilot: string; size?: string; userId?: string | null | undefined }) {
+  const photo = useProfilePhoto(userId);
   return <span className={`avatar-pilot overflow-hidden ${size}`} data-pilot={pilot}>
     {photo ? <img className="h-full w-full object-cover" src={photo} alt="" onError={event => { event.currentTarget.hidden = true; }} /> : pilot}
   </span>;
@@ -124,13 +129,11 @@ export function CrewShell({ tab, immersive = false, children }: { tab: string; i
     setBusy(true);
     try {
       if (photo instanceof File && photo.size && user) {
-        const extensions: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
-        const extension = extensions[photo.type];
-        if (!extension || photo.size > 5 * 1024 * 1024) {
-          toast.error('Choisis une photo JPEG, PNG ou WebP de moins de 5 Mo.');
+        if (photo.size > 30 * 1024 * 1024) {
+          toast.error('Choisis une photo de moins de 30 Mo.');
           return;
         }
-        const avatar = await upload(photo, extension, 'avatars');
+        const avatar = await upload(await croppedAvatar(photo, form), 'jpg', 'avatars');
         const { error } = await supabase.from('profiles').update({ avatar_url: avatar }).eq('id', user.id).select('id').single();
         if (error) throw error;
         void queryClient.invalidateQueries({ queryKey: ['profile-photo', user.id] });
@@ -253,9 +256,7 @@ export function CrewShell({ tab, immersive = false, children }: { tab: string; i
             {user?.email && <Button variant="outline" onClick={() => void resetPassword(user.email)}>Réinitialiser le mot de passe</Button>}
           </>}
           {settingsPage === 'profile' && <form onSubmit={saveFirstName} className="grid gap-4">
-            <label className="grid gap-2 text-sm">Photo de profil (facultative)
-              <input name="avatar" type="file" accept="image/jpeg,image/png,image/webp" />
-            </label>
+            <AvatarCropFields />
             <label className="grid gap-2 text-sm">Prénom<input name="firstName" defaultValue={firstName} required maxLength={80} autoComplete="given-name" /></label>
             <label className="grid gap-2 text-sm">
               Région

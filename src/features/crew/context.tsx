@@ -4,13 +4,21 @@ import { supabase } from '@/integrations/supabase/client';
 import { demoRecords, type CrewRecord } from './data';
 import { toast } from 'sonner';
 import { useLiveLocation } from './live-location';
-type Crew = { records:CrewRecord[]; user:User|null; name:string; firstName:string; sharing:boolean; setSharing:(enabled:boolean)=>void; positionClock:number; add:(kind:string,payload:Record<string,unknown>)=>Promise<void>; update:(id:string,payload:Record<string,unknown>)=>Promise<void>; upload:(file:Blob,extension:string,folder?:string)=>Promise<string>; refresh:()=>Promise<void>; loading:boolean };
+type Crew = { records:CrewRecord[]; user:User|null; name:string; firstName:string; aerial:boolean; setAerial:(enabled:boolean)=>void; sharing:boolean; setSharing:(enabled:boolean)=>void; positionClock:number; add:(kind:string,payload:Record<string,unknown>)=>Promise<void>; update:(id:string,payload:Record<string,unknown>)=>Promise<void>; remove:(id:string)=>Promise<void>; upload:(file:Blob,extension:string,folder?:string)=>Promise<string>; refresh:()=>Promise<void>; loading:boolean };
 const CrewContext=createContext<Crew|null>(null);
 export function CrewProvider({children}:{children:ReactNode}) {
  const [user,setUser]=useState<User|null>(null); const [demo,setDemo]=useState(demoRecords); const [cloud,setCloud]=useState<{userId:string;items:CrewRecord[]}>(); const [name,setName]=useState('Vous'); const [loading,setLoading]=useState(false);
  const givenName = user?.user_metadata['given_name'];
  const firstName = typeof givenName === 'string' ? givenName.trim() : '';
  useEffect(()=>{ let active=true; supabase.auth.getUser().then(({data})=>{if(active)setUser(data.user)}); const {data:{subscription}}=supabase.auth.onAuthStateChange((event,session)=>{ if(['SIGNED_IN','SIGNED_OUT','USER_UPDATED'].includes(event))setUser(session?.user??null); }); return ()=>{active=false;subscription.unsubscribe()}; },[]);
+ const [aerial, setAerialState] = useState(false);
+ useEffect(() => {
+   try { setAerialState(localStorage.getItem('mybike:map-style') === 'aerial'); } catch { /* Keep the default map. */ }
+ }, []);
+ function setAerial(enabled: boolean) {
+   setAerialState(enabled);
+   try { localStorage.setItem('mybike:map-style', enabled ? 'aerial' : 'streets'); } catch { /* Current setting still applies. */ }
+ }
  const userId = user?.id;
  const displayName = firstName || (userId ? name : 'Vous');
  const [sharePreference, setSharePreference] = useState<{ userId: string; enabled: boolean }>();
@@ -74,8 +82,15 @@ export function CrewProvider({children}:{children:ReactNode}) {
    }
    changeRecords(items => items.map(item => item.id === id ? { ...item, payload } : item));
  }
+ async function remove(id: string) {
+   if (userId) {
+     const { error } = await supabase.from('group_records').delete().eq('id', id).eq('author_id', userId).select('id').single();
+     if (error) throw error;
+   }
+   changeRecords(items => items.filter(item => item.id !== id));
+ }
   async function upload(file:Blob,extension:string,folder?:string){if(!user)return URL.createObjectURL(file);const path=`${user.id}/${folder ? folder + '/' : ''}${crypto.randomUUID()}.${extension}`;const {error}=await supabase.storage.from('group-media').upload(path,file);if(error)throw error;return path;}
- return <CrewContext.Provider value={{records,user,name:displayName,firstName,sharing,setSharing,positionClock,add,update,upload,refresh,loading:!!userId && loading}}>{children}</CrewContext.Provider>;
+ return <CrewContext.Provider value={{records,user,name:displayName,firstName,aerial,setAerial,sharing,setSharing,positionClock,add,update,remove,upload,refresh,loading:!!userId && loading}}>{children}</CrewContext.Provider>;
 }
 export function useCrew(){const value=useContext(CrewContext);if(!value)throw new Error('CrewProvider required');return value;}
 export async function resolveMedia(path:string){ if(path.startsWith('blob:')||path.startsWith('https:'))return path;const {data,error}=await supabase.storage.from('group-media').createSignedUrl(path,300);if(error)throw error;return data.signedUrl; }

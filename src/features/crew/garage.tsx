@@ -2,7 +2,8 @@
 import { ArrowLeft, Bike, ChevronRight, Gauge, Pencil, Timer, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { Link } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
+import { jpeg, loadPhoto } from './photo-crop';
 import { VehicleDescription } from './vehicle-description';
 import { AddVehicle } from './add-vehicle';
 import { CrewShell } from './shell';
@@ -71,9 +72,11 @@ export function VehiclePage({ vehicleId }: { vehicleId: string }) {
 }
 
 function VehicleDetails({ record }: { record: CrewRecord }) {
-  const { user, update, upload } = useCrew();
+  const { user, update, remove, upload } = useCrew();
+  const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const vehicle = record.payload as unknown as Details;
   const editable = !user || record.author_id === user.id;
   const photos = vehicle.photos ?? [];
@@ -94,27 +97,52 @@ function VehicleDetails({ record }: { record: CrewRecord }) {
     const removed = new Set(form.getAll('removePhoto'));
     const kept = photos.filter(path => !removed.has(path));
     const files = form.getAll('photos').filter((file): file is File => file instanceof File && file.size > 0);
-    const extensions: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
     if (!name || !type || !Number.isInteger(cc) || cc < 1 || !validCounter(hours) || !validCounter(km)) {
       toast.error('Vérifie le modèle, le type, la cylindrée et les compteurs.');
       return;
     }
-    if (kept.length + files.length > 16 || files.some(file => file.size > 8 * 1024 * 1024 || !extensions[file.type])) {
-      toast.error('Choisis jusqu’à 16 photos JPEG, PNG ou WebP de 8 Mo maximum.');
+    if (kept.length + files.length > 32 || files.some(file => file.size > 30 * 1024 * 1024)) {
+      toast.error('Choisis jusqu’à 32 photos de 30 Mo maximum chacune.');
       return;
     }
     setSaving(true);
     try {
       const uploaded: string[] = [];
-      for (const file of files) uploaded.push(await upload(file, extensions[file.type]!, 'vehicles'));
+      for (const file of files) {
+        const image = await loadPhoto(file);
+        const factor = Math.min(1, 2000 / Math.max(image.naturalWidth, image.naturalHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * factor));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * factor));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Impossible de préparer une photo.');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+        uploaded.push(await upload(await jpeg(canvas), 'jpg', 'vehicles'));
+      }
       await update(record.id, {
         ...record.payload, name, type, cc, hours, km, description, parts, alert, photos: [...kept, ...uploaded],
         maintenance: entry ? [...vehicle.maintenance, entry] : vehicle.maintenance,
       });
       setEditing(false);
       toast.success('Fiche enregistrée.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'La fiche n’a pas pu être enregistrée.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteVehicle() {
+    if (!editable || saving) return;
+    setSaving(true);
+    try {
+      await remove(record.id);
+      toast.success('Véhicule supprimé.');
+      await navigate({ to: '/vehicules', replace: true });
     } catch {
-      toast.error('La fiche n’a pas pu être enregistrée.');
+      toast.error('Le véhicule n’a pas pu être supprimé.');
     } finally {
       setSaving(false);
     }
@@ -129,7 +157,7 @@ function VehicleDetails({ record }: { record: CrewRecord }) {
             {record.author_id && <Link className="ml-2 underline" to="/pilotes/$pilotId" params={{ pilotId: record.author_id }}>{vehicle.owner || 'Voir le profil'}</Link>}
           </p>
         </div>
-        {editable && !editing && <Button onClick={() => setEditing(true)}><Pencil /> Modifier la fiche</Button>}
+        {editable && !editing && <Button className="w-full sm:w-auto" onClick={() => { setEditing(true); setConfirmDelete(false); }}><Pencil /> Modifier la fiche</Button>}
       </header>
       {!editing ? <>
         <div className="grid grid-cols-2 gap-2 overflow-hidden rounded-xl">
@@ -148,6 +176,13 @@ function VehicleDetails({ record }: { record: CrewRecord }) {
             {vehicle.alert && <p className="text-sm text-muted-foreground">{vehicle.alert}</p>}
             {vehicle.maintenance.map((entry, index) => <p key={index} className="text-sm">{entry}</p>)}
           </section>
+          {confirmDelete ? <div className="grid gap-2">
+            <p>Supprimer ce véhicule et sa fiche ?</p>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="destructive" disabled={saving} onClick={deleteVehicle}>Confirmer la suppression</Button>
+              <Button variant="outline" disabled={saving} onClick={() => setConfirmDelete(false)}>Annuler</Button>
+            </div>
+          </div> : <Button variant="outline" className="justify-self-start" onClick={() => setConfirmDelete(true)}>Supprimer ce véhicule</Button>}
         </>}
       </> : (
         <form className="grid gap-3" onSubmit={save}>
@@ -158,7 +193,7 @@ function VehicleDetails({ record }: { record: CrewRecord }) {
           </div>
           <VehicleDescription initial={vehicle.description ?? ''} model={vehicle.name} />
           <label className="grid gap-1">Pièces et équipement<textarea name="parts" maxLength={1200} defaultValue={vehicle.parts} placeholder="Ex. Pneus, suspensions, échappement…" /></label>
-          <label className="grid gap-1">Ajouter des photos<input type="file" name="photos" multiple accept="image/jpeg,image/png,image/webp" /></label>
+          <label className="grid gap-1">Ajouter des photos<input className="w-full max-w-full text-sm" type="file" name="photos" multiple accept="image/*,.heic,.heif" /><span className="text-sm text-muted-foreground">Jusqu’à 32 photos dans la fiche.</span></label>
           {photos.length > 0 && <fieldset className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <legend className="mb-2">Photos actuelles</legend>
             {photos.map((path, index) => <label key={path} className="grid gap-1 text-sm">
@@ -172,7 +207,7 @@ function VehicleDetails({ record }: { record: CrewRecord }) {
           </div>
           <label className="grid gap-1">Ajouter un entretien<input name="service" maxLength={120} placeholder="Ex. Vidange · 125 h" /></label>
           <label className="grid gap-1">Rappel d’entretien<input name="alert" maxLength={120} defaultValue={vehicle.alert} /></label>
-          <div className="flex gap-2">
+          <div className="vehicle-edit-actions flex flex-wrap gap-2">
             <Button disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer'}</Button>
             <Button type="button" variant="ghost" disabled={saving} onClick={() => setEditing(false)}>Annuler</Button>
           </div>
