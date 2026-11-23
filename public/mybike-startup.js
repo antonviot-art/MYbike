@@ -1,6 +1,6 @@
-const cacheName = 'mybike-startup-v1';
+const cacheName = 'mybike-startup-v2';
 const fallbackPath = '/mybike-startup.html';
-const routes = new Set(['/', '/discussion', '/talkie', '/vehicules', '/map', '/medias']);
+const routes = new Set(['/', '/discussion', '/talkie', '/vehicules', '/map', '/parcours', '/medias']);
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
@@ -24,7 +24,7 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (event.request.mode !== 'navigate' || event.request.method !== 'GET' ||
-      url.origin !== self.location.origin || url.search || !routes.has(url.pathname)) return;
+      url.origin !== self.location.origin || url.search || !(routes.has(url.pathname) || /^\/(?:pilotes|vehicules)\/[^/]+$/.test(url.pathname))) return;
 
   const network = fetch(event.request).catch(() => null);
   event.waitUntil(network.then(() => {}));

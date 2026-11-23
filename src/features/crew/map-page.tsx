@@ -45,7 +45,7 @@ export function MapPage() {
   }
 
   return (
-    <CrewShell tab="Carte">
+    <CrewShell tab="Localiser">
       <section className="map-screen" aria-label="Carte des sorties">
         <ClientOnly fallback={<div className="map-canvas bg-secondary grid place-items-center">Chargement de la carte…</div>}>
           <Suspense fallback={<div className="map-canvas bg-secondary" />}>

@@ -4,8 +4,9 @@ import 'leaflet/dist/leaflet.css';
 
 type Marker = { lat: number; lng: number; label: string; live?: boolean };
 
-export default function MapView({ points, markers, focus, onPoint }: {
+export default function MapView({ points, segments, markers, focus, onPoint }: {
   points: [number, number][];
+  segments?: [number, number][][];
   markers: Marker[];
   focus: number;
   onPoint: (lat: number, lng: number) => void;
@@ -42,12 +43,14 @@ export default function MapView({ points, markers, focus, onPoint }: {
       const options = { radius: 8, color: marker.live ? liveColor : color, fillOpacity: 0.7, weight: 3 };
       L.circleMarker([marker.lat, marker.lng], options).bindPopup(label).addTo(group);
     }
-    if (points.length > 1) L.polyline(points, { color, weight: 4 }).addTo(group);
-  }, [points, markers]);
+    if (segments?.length) L.polyline(segments, { color, weight: 4 }).addTo(group);
+    else if (points.length > 1) L.polyline(points, { color, weight: 4 }).addTo(group);
+  }, [points, segments, markers]);
 
   useEffect(() => {
-    if (points.length > 1) map.current?.fitBounds(L.latLngBounds(points), { padding: [30, 30] });
-  }, [points]);
+    const positions = segments?.flat() ?? points;
+    if (positions.length) map.current?.fitBounds(L.latLngBounds(positions), { padding: [30, 30], maxZoom: 16 });
+  }, [points, segments]);
 
   useEffect(() => {
     if (!focus) return;

@@ -268,3 +268,16 @@ input:focus, textarea:focus { outline: 1px solid var(--primary); }
 .map-tools > * { box-shadow: 0 2px 8px var(--overlay); }
 .map-status { position: absolute; bottom: calc(84px + env(safe-area-inset-bottom)); left: 12px; right: 12px; width: fit-content; max-width: calc(100% - 24px); padding: 10px 12px; display: grid; gap: 6px; border-radius: 14px; background: var(--secondary); font-size: .875rem; z-index: 2; }
 .map-screen .leaflet-bottom { bottom: calc(76px + env(safe-area-inset-bottom)); }
+
+.app-nav-links { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+@media (max-width: 395px) {
+  .app-nav { width: calc(100% - 12px); padding-inline: 2px; }
+  .nav-item { font-size: 9px; }
+}
+.conversation-screen { display: flex; flex-direction: column; }
+.discussion-screen { min-height: calc(100dvh - 235px); }
+.discussion-screen .chat-feed { flex: 1; max-height: max(14rem, calc(100dvh - 320px)); min-height: 14rem; }
+.ride-record, .vehicle-detail { padding: clamp(14px, 3vw, 26px); border: 1px solid var(--border); border-radius: 20px; background: var(--secondary); }
+.track-map { height: clamp(270px, 45vh, 440px); }
+.track-map .map-canvas { height: 100%; }
+.vehicle-detail .vehicle-photo { max-height: 540px; }

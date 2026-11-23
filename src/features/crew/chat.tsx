@@ -1,6 +1,7 @@
 ﻿import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ArrowLeft, BarChart3, Copy, MapPin, MessageSquare, Mic, Send, Square, Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { Link } from '@tanstack/react-router';
 import { Button } from '@/components/ui/button';
 import { resolveMedia, useCrew } from './context';
 import { Avatar, CrewShell } from './shell';
@@ -280,7 +281,7 @@ function Conversation({ room, talkie, onBack }: { room: Room; talkie: boolean; o
   }
 
   return (
-    <section className={`chat-panel mx-auto max-w-3xl ${talkie ? 'flex flex-col' : ''}`}>
+    <section className={`chat-panel mx-auto conversation-screen ${talkie ? 'talkie-screen' : 'discussion-screen'}`}>
       <header className="flex flex-wrap items-center gap-3 border-b border-border p-4">
         <Button variant="ghost" size="icon" onClick={onBack} aria-label="Toutes les discussions"><ArrowLeft /></Button>
         <h2 className="flex-1 text-lg font-semibold">{room.label}</h2>
@@ -329,7 +330,9 @@ function Conversation({ room, talkie, onBack }: { room: Room; talkie: boolean; o
           const own = user ? record.author_id === user.id : message.name === name;
           return (
             <div key={record.id} className={`mb-4 flex items-end gap-2 ${own ? 'flex-row-reverse' : ''}`}>
-              <Avatar pilot={message.pilot} userId={record.author_id} />
+              {record.author_id ? <Link to="/pilotes/$pilotId" params={{ pilotId: record.author_id }} aria-label={'Voir le profil de ' + message.name}>
+                <Avatar pilot={message.pilot} userId={record.author_id} />
+              </Link> : <Avatar pilot={message.pilot} />}
               <div className={`min-w-0 max-w-[80%] ${own ? 'text-right' : ''}`}>
                 <p className="mb-1 text-xs text-muted-foreground">{own ? 'Toi' : message.name} · {message.time}</p>
                 <div className={`bubble max-w-full break-words text-left ${own ? 'bubble-own' : ''}`}>{message.audio ? <VoiceMessage path={message.audio} /> : message.text}</div>

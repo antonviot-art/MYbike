@@ -1,7 +1,7 @@
 ﻿import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bike, Flag, House, Images, LockKeyhole, Map, MessageSquare, Radio, Settings, UserRound } from 'lucide-react';
+import { Bike, Flag, House, Images, LockKeyhole, Map, MessageSquare, Radio, Route as RouteIcon, Settings, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -15,7 +15,8 @@ const tabs = [
   { to: '/discussion', label: 'Discussion', icon: MessageSquare },
   { to: '/talkie', label: 'Talkie', icon: Radio },
   { to: '/vehicules', label: 'Véhicules', icon: Bike },
-  { to: '/map', label: 'Carte', icon: Map },
+  { to: '/map', label: 'Localiser', icon: Map },
+  { to: '/parcours', label: 'Parcours', icon: RouteIcon },
   { to: '/medias', label: 'Médias', icon: Images },
 ] as const;
 
@@ -191,11 +192,11 @@ export function CrewShell({ tab, children }: { tab: string; children: ReactNode 
           </div>
         </div>
       </header>
-      <main className={tab === 'Carte' ? 'app-map-main' : 'app-width app-main pt-8 sm:pt-10'}>
-        {tab !== 'Accueil' && tab !== 'Carte' && <h1 className="page-title mb-6">{tab}</h1>}
-        {loading && tab !== 'Carte' && <p role="status" className="mb-3 text-sm text-muted-foreground">Synchronisation…</p>}
+      <main className={tab === 'Localiser' ? 'app-map-main' : 'app-width app-main pt-8 sm:pt-10'}>
+        {tab !== 'Accueil' && tab !== 'Localiser' && <h1 className="page-title mb-6">{tab}</h1>}
+        {loading && tab !== 'Localiser' && <p role="status" className="mb-3 text-sm text-muted-foreground">Synchronisation…</p>}
         <div className="page-enter">{children}</div>
-        {!user && tab !== 'Carte' && (
+        {!user && tab !== 'Localiser' && (
           <footer className="app-footer flex items-center gap-2">
             <LockKeyhole size={13} /> Données fictives · modifications temporaires
           </footer>
@@ -204,7 +205,7 @@ export function CrewShell({ tab, children }: { tab: string; children: ReactNode 
       <nav className="app-nav" aria-label="Navigation principale">
         <div className="app-nav-links">
           {tabs.map(({ to, label, icon: Icon }) => (
-            <Link key={to} to={to} activeOptions={{ exact: true }} className="nav-item">
+            <Link key={to} to={to} activeOptions={{ exact: to !== '/vehicules' }} className="nav-item">
               <Icon size={20} aria-hidden="true" />
               {label}
             </Link>
@@ -260,6 +261,8 @@ export function CrewShell({ tab, children }: { tab: string; children: ReactNode 
             </label>
             <Button disabled={busy}>{busy ? 'Enregistrement…' : 'Enregistrer mon profil'}</Button>
           </form>
+          {settings && user && !needsProfile &&
+            <Button asChild variant="outline" onClick={() => setSettings(false)}><Link to="/pilotes/$pilotId" params={{ pilotId: user.id }}>Voir mon profil</Link></Button>}
           <Button variant="ghost" onClick={signOut} disabled={busy}>Se déconnecter</Button>
         </DialogContent>
       </Dialog>

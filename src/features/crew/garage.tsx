@@ -2,7 +2,8 @@
 import { Bike, ChevronRight, Gauge, Timer, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Link } from '@tanstack/react-router';
+import { VehicleDescription } from './vehicle-description';
 import { AddVehicle } from './add-vehicle';
 import { CrewShell } from './shell';
 import { resolveMedia, useCrew } from './context';
@@ -26,9 +27,7 @@ type Details = Vehicle & { description?: string; parts?: string; photos?: string
 
 export function GaragePage() {
   const { records, user } = useCrew();
-  const [selected, setSelected] = useState<string>();
   const vehicles = records.filter(record => record.kind === 'vehicle');
-  const current = vehicles.find(record => record.id === selected);
 
   return (
     <CrewShell tab="Véhicules">
@@ -42,7 +41,7 @@ export function GaragePage() {
           const vehicle = record.payload as unknown as Details;
           return (
             <article key={record.id} className="overflow-hidden border border-border bg-secondary">
-              <button className="block w-full text-left focus-visible:outline-2 focus-visible:outline-offset-[-4px] focus-visible:outline-ring" onClick={() => setSelected(record.id)}>
+              <Link to="/vehicules/$vehicleId" params={{ vehicleId: record.id }} className="block w-full text-left focus-visible:outline-2 focus-visible:outline-offset-[-4px] focus-visible:outline-ring">
                 <VehiclePhoto path={vehicle.photos?.[0] ?? images[vehicle.image] ?? ''} label={vehicle.name} />
                 <div className="flex items-center justify-between gap-3 p-4">
                   <div>
@@ -51,16 +50,22 @@ export function GaragePage() {
                   </div>
                   <ChevronRight size={19} aria-hidden="true" />
                 </div>
-              </button>
+              </Link>
             </article>
           );
         })}
       </div>
-      <Dialog open={Boolean(current)} onOpenChange={open => { if (!open) setSelected(undefined); }}>
-        {current && <VehicleDetails key={current.id} record={current} />}
-      </Dialog>
     </CrewShell>
   );
+}
+
+export function VehiclePage({ vehicleId }: { vehicleId: string }) {
+  const { records, loading } = useCrew();
+  const record = records.find(item => item.kind === 'vehicle' && item.id === vehicleId);
+  return <CrewShell tab="Véhicules">
+    <Link to="/vehicules" className="mb-4 inline-block text-sm text-muted-foreground underline">Retour au garage</Link>
+    {record ? <VehicleDetails key={record.id} record={record} /> : <p>{loading ? 'Chargement de la fiche…' : 'Véhicule introuvable.'}</p>}
+  </CrewShell>;
 }
 
 function VehicleDetails({ record }: { record: CrewRecord }) {
@@ -86,8 +91,8 @@ function VehicleDetails({ record }: { record: CrewRecord }) {
       toast.error('Vérifie les compteurs.');
       return;
     }
-    if (photos.length + files.length > 8 || files.some(file => file.size > 8 * 1024 * 1024 || !extensions[file.type])) {
-      toast.error('Choisis jusqu’à 8 photos JPEG, PNG ou WebP de 8 Mo maximum.');
+    if (photos.length + files.length > 16 || files.some(file => file.size > 8 * 1024 * 1024 || !extensions[file.type])) {
+      toast.error('Choisis jusqu’à 16 photos JPEG, PNG ou WebP de 8 Mo maximum.');
       return;
     }
     setSaving(true);
@@ -108,9 +113,11 @@ function VehicleDetails({ record }: { record: CrewRecord }) {
   }
 
   return (
-    <DialogContent className="max-h-[90dvh] overflow-y-auto">
-      <DialogTitle className="font-display text-3xl">{vehicle.name}</DialogTitle>
-      <DialogDescription>{vehicle.type} · {vehicle.cc} cm³{vehicle.owner ? ' · ' + vehicle.owner : ''}</DialogDescription>
+    <article className="vehicle-detail mx-auto grid max-w-5xl gap-5">
+      <h2 className="font-display text-5xl font-semibold">{vehicle.name}</h2>
+      <p className="text-muted-foreground">{vehicle.type} · {vehicle.cc} cm³
+        {record.author_id && <Link className="ml-2 underline" to="/pilotes/$pilotId" params={{ pilotId: record.author_id }}>{vehicle.owner || 'Voir le profil'}</Link>}
+      </p>
       {!editing ? <>
         <div className="grid grid-cols-2 gap-2 overflow-hidden rounded-xl">
           {(photos.length ? photos : [images[vehicle.image] ?? '']).map((path, index) => (
@@ -132,7 +139,7 @@ function VehicleDetails({ record }: { record: CrewRecord }) {
         </>}
       </> : (
         <form className="grid gap-3" onSubmit={save}>
-          <label className="grid gap-1">Description<textarea name="description" maxLength={1200} defaultValue={vehicle.description} /></label>
+          <VehicleDescription initial={vehicle.description ?? ''} model={vehicle.name} />
           <label className="grid gap-1">Pièces et équipement<textarea name="parts" maxLength={1200} defaultValue={vehicle.parts} placeholder="Ex. Pneus, suspensions, échappement…" /></label>
           <label className="grid gap-1">Ajouter des photos<input type="file" name="photos" multiple accept="image/jpeg,image/png,image/webp" /></label>
           <div className="grid grid-cols-2 gap-3">
@@ -146,6 +153,6 @@ function VehicleDetails({ record }: { record: CrewRecord }) {
           </div>
         </form>
       )}
-    </DialogContent>
+    </article>
   );
 }
