@@ -58,7 +58,7 @@ async function prepareRoomPhoto(form: FormData) {
 export function ChatPage() {
   const { user, records, add, refresh, upload, name } = useCrew();
   const [selected, setSelected] = useState('');
-  const [menu, setMenu] = useState<'create' | 'photo'>();
+  const [menu, setMenu] = useState<'group' | 'create' | 'join' | 'photo'>();
   const [shared, setShared] = useState<{ userId: string; rooms: SharedRoom[] }>();
   const [busy, setBusy] = useState(false);
   const userId = user?.id;
@@ -166,6 +166,7 @@ export function ChatPage() {
         setShared({ userId, rooms: await socialCall('mybike_rooms_list', {}) });
         await refresh();
         setSelected('room:' + id);
+        setMenu(undefined);
       } catch (error) {
         toast.error(String(error));
       } finally {
@@ -180,31 +181,40 @@ export function ChatPage() {
     }
     setJoined(previous => [...new Set([...previous, match.id])]);
     setSelected(match.id);
+    setMenu(undefined);
   }
 
   return (
     <CrewShell tab="Discussion" immersive={Boolean(current)}>
       {current ? <Conversation key={current.id} room={current} onBack={() => setSelected('')} onPhoto={() => setMenu('photo')} /> : (
         <div className="grid max-w-2xl gap-4">
+          <Button size="sm" variant="outline" className="justify-self-start rounded-full" onClick={() => setMenu('group')}>
+            <UsersRound /> Groupe
+          </Button>
           {rooms.map(room => (
             <Button key={room.id} variant="outline" onClick={() => setSelected(room.id)} className="h-16 justify-start gap-3 px-3">
               <RoomAvatar room={room} /><span className="truncate">{room.label}</span>
             </Button>
           ))}
-            <section className="chat-panel grid gap-4 p-4">
-              <h2 className="font-semibold">{user ? "Discussions par code" : "Groupes de démo"}</h2>
-              {!user && <p className="text-sm text-muted-foreground">Les codes fonctionnent dans cette session de démo.</p>}
-              <Button className="justify-self-start" onClick={() => setMenu('create')}><Plus /> Créer un groupe</Button>
-              <form className="flex flex-wrap gap-2" onSubmit={joinRoom}>
-                <input className="min-w-0 flex-1" name="code" aria-label="Code du groupe" placeholder="Code du groupe" required />
-                <Button disabled={busy} variant="secondary">Rejoindre une discussion</Button>
-              </form>
-            </section>
         </div>
       )}
       <Dialog open={Boolean(menu)} onOpenChange={open => { if (!open && !busy) setMenu(undefined); }}>
-        {menu && <DialogContent className="max-h-[90dvh] overflow-y-auto">
-          <DialogTitle>{menu === 'create' ? 'Créer un groupe' : 'Modifier la photo du groupe'}</DialogTitle>
+        {menu && <DialogContent className="max-h-[90dvh] max-w-sm overflow-y-auto">
+          <DialogTitle>{menu === 'group' ? 'Groupe' : menu === 'join' ? 'Rejoindre un groupe' : menu === 'create' ? 'Créer un groupe' : 'Modifier la photo du groupe'}</DialogTitle>
+          {menu === 'group' ? <>
+            <DialogDescription>{user ? 'Crée un groupe ou rejoins-en un avec son code.' : 'Les codes fonctionnent dans cette session de démo.'}</DialogDescription>
+            <div className="grid gap-2">
+              <Button onClick={() => setMenu('create')}><Plus /> Créer un groupe</Button>
+              <Button variant="outline" onClick={() => setMenu('join')}>Rejoindre un groupe</Button>
+            </div>
+          </> : menu === 'join' ? <>
+            <DialogDescription>Saisis le code partagé par un membre.</DialogDescription>
+            <form className="grid gap-3" onSubmit={joinRoom}>
+              <input name="code" aria-label="Code du groupe" placeholder="Code du groupe" autoCapitalize="characters" autoComplete="off" required />
+              <Button disabled={busy}>Rejoindre</Button>
+            </form>
+            <Button variant="ghost" onClick={() => setMenu('group')} disabled={busy}>Retour</Button>
+          </> : <>
           <DialogDescription>{menu === 'create' ? 'Choisis un nom et une photo, puis partage le code du groupe.' : 'Les membres du groupe verront la nouvelle photo.'}</DialogDescription>
           <form className="grid gap-4" onSubmit={menu === 'create' ? createRoom : changeRoomPhoto}>
             {menu === 'create' && <label className="grid gap-1 text-sm">Nom du groupe
@@ -213,6 +223,8 @@ export function ChatPage() {
             <RoomPhotoInput />
             <Button disabled={busy}>{busy ? 'Enregistrement…' : menu === 'create' ? 'Créer le groupe' : 'Enregistrer la photo'}</Button>
           </form>
+          {menu === 'create' && <Button variant="ghost" onClick={() => setMenu('group')} disabled={busy}>Retour</Button>}
+          </>}
         </DialogContent>}
       </Dialog>
     </CrewShell>

@@ -62,6 +62,8 @@ it('opens the group configuration before creating a discussion', async () => {
   add.mockClear();
   render(<ChatPage />);
   expect(screen.queryByRole('textbox', { name: 'Nom du groupe' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /^Groupe$/ }));
+  expect(screen.getByRole('button', { name: 'Rejoindre un groupe' })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Créer un groupe' }));
   expect(screen.getByRole('dialog', { name: 'Créer un groupe' })).toBeInTheDocument();
   expect(screen.getByLabelText('Photo du groupe (facultative)')).toBeInTheDocument();
