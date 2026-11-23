@@ -20,12 +20,15 @@ it('keeps a GPS draft, rejects weak fixes and does not connect gaps in reception
   try {
     const first = renderHook(() => useTrackRecorder(key));
     act(() => first.result.current.start());
-    const fix = (time: number, lat: number, accuracy: number) => act(() => onPosition({
-      timestamp: time, coords: { latitude: lat, longitude: 4.5, accuracy },
+    const fix = (time: number, lat: number, accuracy: number, speed: number | null = null) => act(() => onPosition({
+      timestamp: time, coords: { latitude: lat, longitude: 4.5, accuracy, speed },
     } as GeolocationPosition));
-    fix(10000, 48, 8);
+    fix(10000, 48, 8, 10);
+    expect(first.result.current.speed).toBe(36);
     fix(15000, 49, 120);
+    expect(first.result.current.speed).toBeUndefined();
     fix(20000, 48.001, 8);
+    expect(first.result.current.speed).toBeCloseTo(40.03, 1);
     fix(65000, 48.005, 8);
     act(() => first.result.current.stop());
     expect(clearWatch).toHaveBeenCalledWith(8);

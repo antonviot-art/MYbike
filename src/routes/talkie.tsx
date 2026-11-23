@@ -1,12 +1,5 @@
-﻿import { createFileRoute } from '@tanstack/react-router';
-import { ChatPage } from '@/features/crew/chat';
-import { pageHead } from '@/features/crew/head';
+﻿import { createFileRoute, redirect } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/talkie')({
-  head: () => pageHead('Talkie', 'Envoie et écoute les messages vocaux de ton groupe.'),
-  component: TalkiePage,
+  beforeLoad: () => { throw redirect({ to: '/discussion', replace: true }); },
 });
-
-function TalkiePage() {
-  return <ChatPage talkie />;
-}

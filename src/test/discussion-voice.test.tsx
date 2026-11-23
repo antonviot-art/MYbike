@@ -22,8 +22,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('Talkie', () => {
-  it('records while the control is held and sends only on release', async () => {
+describe('Vocaux dans les discussions', () => {
+  it('records on the first click and sends on the second', async () => {
     const stopTrack = vi.fn();
     const stream = { getTracks: () => [{ stop: stopTrack }] };
     const getUserMedia = vi.fn().mockResolvedValue(stream);
@@ -44,15 +44,15 @@ describe('Talkie', () => {
     }
     vi.stubGlobal('MediaRecorder', Recorder);
 
-    render(<ChatPage talkie />);
+    render(<ChatPage />);
     fireEvent.click(screen.getByRole('button', { name: 'Général' }));
-    const talk = screen.getByRole('button', { name: 'Maintiens pour parler' });
-    fireEvent.keyDown(talk, { key: ' ' });
-    await screen.findByRole('button', { name: 'Relâche pour envoyer' });
+    const talk = screen.getByRole('button', { name: 'Enregistrer un vocal' });
+    fireEvent.click(talk);
+    const sendVoice = await screen.findByRole('button', { name: 'Envoyer le vocal' });
     expect(getUserMedia).toHaveBeenCalledWith({ audio: true });
     expect(add).not.toHaveBeenCalled();
 
-    fireEvent.keyUp(talk, { key: ' ' });
+    fireEvent.click(sendVoice);
     await waitFor(() => expect(add).toHaveBeenCalledWith('message', expect.objectContaining({ room: 'general', audio: 'blob:recorded' })));
     expect(stopTrack).toHaveBeenCalled();
   });

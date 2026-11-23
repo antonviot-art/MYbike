@@ -9,6 +9,7 @@ export function useTrackRecorder(key: string) {
   const [duration, setDuration] = useState(0);
   const [recording, setRecording] = useState(false);
   const [accuracy, setAccuracy] = useState<number>();
+  const [speed, setSpeed] = useState<number>();
   const data = useRef<TrackPoint[][]>([]);
   const durationRef = useRef(0);
   const started = useRef(0);
@@ -48,6 +49,7 @@ export function useTrackRecorder(key: string) {
     started.current = Date.now();
     setRecording(true);
     setAccuracy(undefined);
+    setSpeed(undefined);
 
     async function keepScreenOn() {
       if (!active || document.hidden || (wake && !wake.released)) return;
@@ -63,12 +65,23 @@ export function useTrackRecorder(key: string) {
     const watch = navigator.geolocation.watchPosition(({ coords, timestamp }) => {
       if (!active) return;
       setAccuracy(Math.round(coords.accuracy));
-      if (coords.accuracy > 35 || !Number.isFinite(coords.accuracy) || timestamp <= lastTime) return;
+      if (coords.accuracy > 35 || !Number.isFinite(coords.accuracy) || timestamp <= lastTime) {
+        setSpeed(undefined);
+        return;
+      }
       const point: TrackPoint = [coords.latitude, coords.longitude];
       const gap = timestamp - lastTime > 30000;
+      const reportedSpeed = coords.speed;
+      const hasSpeed = reportedSpeed != null && Number.isFinite(reportedSpeed) && reportedSpeed >= 0 && reportedSpeed <= 70;
       if (lastPoint && !gap) {
         const moved = metersBetween(lastPoint, point);
-        if (moved < Math.max(4, Math.min(coords.accuracy / 2, 12)) || moved > (timestamp - lastTime) / 1000 * 70 + 35) return;
+        const seconds = (timestamp - lastTime) / 1000;
+        const stationary = moved < Math.max(4, Math.min(coords.accuracy / 2, 12));
+        if (moved > seconds * 70 + 35) return;
+        setSpeed(hasSpeed ? reportedSpeed * 3.6 : stationary ? 0 : Math.min(70, moved / seconds) * 3.6);
+        if (stationary) return;
+      } else {
+        setSpeed(hasSpeed ? reportedSpeed * 3.6 : undefined);
       }
       if (!lastPoint || gap) {
         segment = [];
@@ -113,6 +126,7 @@ export function useTrackRecorder(key: string) {
   function stop() {
     control.current?.();
     setRecording(false);
+    setSpeed(undefined);
     setDuration(durationRef.current);
   }
 
@@ -126,5 +140,5 @@ export function useTrackRecorder(key: string) {
     try { localStorage.removeItem(key); } catch { /* Draft already cleared in memory. */ }
   }
 
-  return { segments, distance: trackDistance(segments), duration, recording, accuracy, start, stop, clear };
+  return { segments, distance: trackDistance(segments), duration, recording, accuracy, speed, start, stop, clear };
 }

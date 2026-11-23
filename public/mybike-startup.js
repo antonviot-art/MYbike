@@ -1,6 +1,6 @@
-const cacheName = 'mybike-startup-v2';
+const cacheName = 'mybike-startup-v3';
 const fallbackPath = '/mybike-startup.html';
-const routes = new Set(['/', '/discussion', '/talkie', '/vehicules', '/map', '/parcours', '/medias']);
+const routes = new Set(['/', '/discussion', '/vehicules', '/map', '/parcours', '/medias']);
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {

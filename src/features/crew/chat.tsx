@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, BarChart3, Copy, MapPin, MessageSquare, Mic, Send, Square, Volume2 } from 'lucide-react';
+import { ArrowLeft, BarChart3, Copy, MapPin, MessageSquare, Mic, Send, Square } from 'lucide-react';
 import { toast } from 'sonner';
 import { Link } from '@tanstack/react-router';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,7 @@ import { socialCall, type SharedRoom } from './social';
 
 type Room = { id: string; label: string; code?: string };
 
-export function ChatPage({ talkie = false }: { talkie?: boolean } = {}) {
+export function ChatPage() {
   const { user, records, add, refresh } = useCrew();
   const [selected, setSelected] = useState('');
   const [shared, setShared] = useState<{ userId: string; rooms: SharedRoom[] }>();
@@ -89,16 +89,14 @@ export function ChatPage({ talkie = false }: { talkie?: boolean } = {}) {
   }
 
   return (
-    <CrewShell tab={talkie ? 'Talkie' : 'Discussion'}>
-      {current ? <Conversation key={current.id} room={current} talkie={talkie} onBack={() => setSelected('')} /> : (
+    <CrewShell tab="Discussion" immersive={Boolean(current)}>
+      {current ? <Conversation key={current.id} room={current} onBack={() => setSelected('')} /> : (
         <div className="grid max-w-2xl gap-4">
-          {talkie && <p className="text-muted-foreground">Choisis une discussion pour envoyer ou écouter les vocaux du groupe.</p>}
           {rooms.map(room => (
             <Button key={room.id} variant="outline" onClick={() => setSelected(room.id)} className="h-14 justify-start px-4">
               {room.id === 'general' ? <MessageSquare /> : <MapPin />} {room.label}
             </Button>
           ))}
-          {!talkie && (
             <section className="chat-panel grid gap-4 p-4">
               <h2 className="font-semibold">{user ? "Discussions par code" : "Groupes de démo"}</h2>
               {!user && <p className="text-sm text-muted-foreground">Les codes fonctionnent dans cette session de démo.</p>}
@@ -111,32 +109,26 @@ export function ChatPage({ talkie = false }: { talkie?: boolean } = {}) {
                 <Button disabled={busy} variant="secondary">Rejoindre une discussion</Button>
               </form>
             </section>
-          )}
         </div>
       )}
     </CrewShell>
   );
 }
 
-function Conversation({ room, talkie, onBack }: { room: Room; talkie: boolean; onBack: () => void }) {
+function Conversation({ room, onBack }: { room: Room; onBack: () => void }) {
   const { records, add, name, upload, user } = useCrew();
   const [text, setText] = useState('');
   const [pollOpen, setPollOpen] = useState(false);
   const [recording, setRecording] = useState(false);
   const [micPending, setMicPending] = useState(false);
   const recorder = useRef<MediaRecorder | null>(null);
-  const held = useRef(false);
   const micOpening = useRef(false);
-  const played = useRef(new Set<string>());
-  const playback = useRef<HTMLAudioElement>(null);
-  const [listening, setListening] = useState(false);
-  const [playbackBlocked, setPlaybackBlocked] = useState(false);
   const active = useRef(false);
   const feed = useRef<HTMLDivElement>(null);
   const voter = user?.id ?? 'demo';
   const entries = useMemo(() => records.filter(record =>
-    (talkie ? record.kind === 'message' && typeof record.payload['audio'] === 'string' : record.kind === 'message' || record.kind === 'poll') &&
-    (record.payload['room'] ?? 'general') === room.id), [records, room.id, talkie]);
+    (record.kind === 'message' || record.kind === 'poll') &&
+    (record.payload['room'] ?? 'general') === room.id), [records, room.id]);
 
   useEffect(() => {
     active.current = true;
@@ -151,55 +143,6 @@ function Conversation({ room, talkie, onBack }: { room: Room; talkie: boolean; o
   useEffect(() => {
     if (feed.current) feed.current.scrollTop = feed.current.scrollHeight;
   }, [entries.length]);
-
-  useEffect(() => {
-    const player = playback.current;
-    if (!listening || !player || !user?.id) return;
-    let cancelled = false;
-    async function playNext() {
-      if (!player || cancelled) return;
-      const next = entries.find(entry => entry.author_id !== user?.id && !played.current.has(entry.id));
-      if (!next) return;
-      played.current.add(next.id);
-      try {
-        const url = await resolveMedia(String(next.payload['audio']));
-        if (cancelled) { played.current.delete(next.id); return; }
-        player.src = url;
-        await player.play();
-      } catch {
-        if (!cancelled) {
-          setPlaybackBlocked(true);
-          setListening(false);
-        }
-      }
-    }
-    player.addEventListener('ended', playNext);
-    if (player.paused) void playNext();
-    return () => { cancelled = true; player.removeEventListener('ended', playNext); };
-  }, [entries, listening, user?.id]);
-
-  function toggleListening() {
-    if (listening) {
-      playback.current?.pause();
-      setListening(false);
-      return;
-    }
-    played.current = new Set(entries.map(entry => entry.id));
-    setPlaybackBlocked(false);
-    setListening(true);
-  }
-
-  function releaseTalkie() {
-    held.current = false;
-    const current = recorder.current;
-    if (current?.state === 'recording') current.stop();
-  }
-
-  function holdTalkie() {
-    if (held.current || micOpening.current || recorder.current?.state === 'recording') return;
-    held.current = true;
-    void recordVoice();
-  }
 
   function post(body: Record<string, unknown>) {
     return add('message', {
@@ -247,7 +190,7 @@ function Conversation({ room, talkie, onBack }: { room: Room; talkie: boolean; o
     let stream: MediaStream | undefined;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      if (!active.current || (talkie && !held.current)) {
+      if (!active.current) {
         stream.getTracks().forEach(track => track.stop());
         return;
       }
@@ -281,7 +224,7 @@ function Conversation({ room, talkie, onBack }: { room: Room; talkie: boolean; o
   }
 
   return (
-    <section className={`chat-panel mx-auto conversation-screen ${talkie ? 'talkie-screen' : 'discussion-screen'}`}>
+    <section className="conversation-screen" aria-label="Conversation">
       <header className="flex flex-wrap items-center gap-3 border-b border-border p-4">
         <Button variant="ghost" size="icon" onClick={onBack} aria-label="Toutes les discussions"><ArrowLeft /></Button>
         <h2 className="flex-1 text-lg font-semibold">{room.label}</h2>
@@ -297,13 +240,8 @@ function Conversation({ room, talkie, onBack }: { room: Room; talkie: boolean; o
           }}><Copy /></Button>
         </div>}
       </header>
-      {talkie && user && <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2">
-        <Button variant={listening ? 'default' : 'outline'} aria-pressed={listening} onClick={toggleListening}><Volume2 /> {listening ? 'Lecture auto activée' : 'Activer la lecture auto'}</Button>
-        <span className="text-sm text-muted-foreground">{playbackBlocked ? 'Lecture bloquée par le navigateur. Touche un vocal pour l’écouter.' : 'Garde ce salon ouvert pour entendre les nouveaux vocaux.'}</span>
-        <audio ref={playback} />
-      </div>}
-      <div className={`chat-feed ${talkie ? 'order-last min-h-36 border-t border-border' : ''}`} ref={feed}>
-        {!entries.length && <p className="text-muted-foreground">{talkie ? 'Aucun vocal pour le moment.' : 'Aucun message pour le moment.'}</p>}
+      <div className="chat-feed" ref={feed}>
+        {!entries.length && <p className="text-muted-foreground">Aucun message pour le moment.</p>}
         {entries.map(record => {
           if (record.kind === 'poll') {
             const options = record.payload['options'];
@@ -341,37 +279,13 @@ function Conversation({ room, talkie, onBack }: { room: Room; talkie: boolean; o
           );
         })}
       </div>
-      <div className={talkie ? 'grid justify-items-center gap-2 p-6' : 'border-t border-border p-3'}>
-        {talkie ? (
-          <Button type="button" variant={recording ? 'default' : 'outline'} className="min-h-24 w-full max-w-72 touch-none select-none rounded-full text-base" aria-pressed={recording}
-            onContextMenu={event => event.preventDefault()}
-            onPointerDown={event => {
-              if (event.button !== 0) return;
-              event.currentTarget.setPointerCapture(event.pointerId);
-              holdTalkie();
-            }}
-            onPointerUp={releaseTalkie} onPointerCancel={releaseTalkie} onLostPointerCapture={releaseTalkie}
-            onKeyDown={event => {
-              if (event.key !== ' ' && event.key !== 'Enter') return;
-              event.preventDefault();
-              if (!event.repeat) holdTalkie();
-            }}
-            onKeyUp={event => {
-              if (event.key !== ' ' && event.key !== 'Enter') return;
-              event.preventDefault();
-              releaseTalkie();
-            }}
-            onBlur={releaseTalkie}>
-            {recording ? <Square /> : <Mic />}
-            {micPending ? 'Ouverture du micro…' : recording ? 'Relâche pour envoyer' : 'Maintiens pour parler'}
-          </Button>
-        ) : <form className="flex items-center gap-2" onSubmit={send}>
+      <div className="conversation-compose border-t border-border p-3"><form className="flex items-center gap-2" onSubmit={send}>
           <input className="w-0 flex-1" aria-label="Ton message" placeholder="Écris un message…" value={text} onChange={event => setText(event.target.value)} />
           <Button type="button" variant="ghost" size="icon" aria-label={recording ? 'Envoyer le vocal' : 'Enregistrer un vocal'} disabled={micPending} onClick={recordVoice}>{recording ? <Square /> : <Mic />}</Button>
           <Button type="submit" size="icon" disabled={!text.trim()} aria-label="Envoyer le message"><Send /></Button>
-        </form>}
+        </form>
         {recording && <p role="status" className="mt-2 text-sm">Enregistrement en cours…</p>}
-        {!talkie && <Button type="button" variant="ghost" className="mt-2" aria-expanded={pollOpen} onClick={() => setPollOpen(!pollOpen)}><BarChart3 /> Sondage</Button>}
+        <Button type="button" variant="ghost" className="mt-2" aria-expanded={pollOpen} onClick={() => setPollOpen(!pollOpen)}><BarChart3 /> Sondage</Button>
         {pollOpen && (
           <form className="mt-2 grid gap-3" onSubmit={publishPoll}>
             <label className="grid gap-1">Question<input name="question" maxLength={160} required /></label>

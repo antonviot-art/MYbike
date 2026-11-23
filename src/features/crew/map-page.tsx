@@ -1,6 +1,6 @@
 ﻿import { lazy, Suspense, useState, type FormEvent } from 'react';
 import { ClientOnly } from '@tanstack/react-router';
-import { Navigation, Upload, MapPin, Route, LocateFixed, Share2 } from 'lucide-react';
+import { ArrowRight, Navigation, Upload, MapPin, Route, LocateFixed, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { CrewShell } from './shell';
@@ -56,6 +56,10 @@ export function MapPage() {
           </Suspense>
         </ClientOnly>
         <div className="map-tools" aria-label="Outils de la carte">
+          {user && !sharing && <div className="map-share-tip" role="status">
+            <span>Partage ta position pour que tes amis puissent te rejoindre.</span>
+            <ArrowRight size={18} aria-hidden="true" />
+          </div>}
           {user && <Button size="icon" aria-pressed={sharing} variant={sharing ? 'default' : 'secondary'} aria-label={sharing ? 'Arrêter le partage de position' : 'Partager ma position'} title={sharing ? 'Arrêter le partage' : 'Partager ma position'} onClick={() => {
             if (!navigator.geolocation) { toast.error('Position indisponible.'); return; }
             setSharing(!sharing);

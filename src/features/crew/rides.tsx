@@ -1,6 +1,6 @@
 ﻿import { lazy, Suspense, useState, type FormEvent } from 'react';
 import { ClientOnly, Link } from '@tanstack/react-router';
-import { Circle, Route, Square } from 'lucide-react';
+import { Circle, Gauge, Route, Square } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { useCrew } from './context';
@@ -82,6 +82,11 @@ function RideRecorder() {
         <span>{Math.floor(draft.duration / 60000)} min {Math.floor(draft.duration / 1000) % 60} s</span>
         {draft.recording && <span role="status">{draft.accuracy === undefined ? 'Recherche du signal GPS…' : draft.accuracy > 35 ? 'Signal GPS faible · en attente d’un meilleur point' : 'Précision GPS ± ' + draft.accuracy + ' m'}</span>}
       </div>
+      {draft.recording && <div className="ride-speed" aria-label="Vitesse GPS actuelle">
+        <Gauge size={24} aria-hidden="true" />
+        <span className="font-display text-5xl font-bold tabular-nums">{draft.speed === undefined ? '—' : Math.round(draft.speed)}</span>
+        <span className="text-sm text-muted-foreground">km/h</span>
+      </div>}
       <p className="text-sm text-muted-foreground">Garde cet écran ouvert pendant l’enregistrement. La trace reste sur cet appareil jusqu’au partage.</p>
       <div className="flex flex-wrap gap-2">
         {draft.recording
