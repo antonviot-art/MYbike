@@ -124,6 +124,16 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
+  useEffect(() => {
+    if (!import.meta.env.PROD || !("serviceWorker" in navigator)) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("_mybike_open") === "1") {
+      url.searchParams.delete("_mybike_open");
+      window.history.replaceState(window.history.state, "", url.href);
+    }
+    void navigator.serviceWorker.register("/mybike-startup.js").catch(() => {});
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#121218">
+  <title>MYbike</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100dvh; display: grid; place-items: center; color: oklch(0.96 0.002 285); background: oklch(0.15 0.009 275); font: 1rem system-ui, sans-serif; }
+    main { width: min(24rem, 100%); padding: 1.5rem; text-align: center; }
+    .mark { display: grid; place-items: center; width: 4.25rem; height: 4.25rem; margin: 0 auto 1.5rem; border-radius: 1.35rem; background: oklch(0.59 0.22 30); box-shadow: 0 12px 40px oklch(0.59 0.22 30 / .28); transform: rotate(-8deg); animation: turn 2.2s cubic-bezier(.55,.05,.25,1) infinite; }
+    h1 { margin: 0; font-size: 2.5rem; font-weight: 850; font-style: italic; letter-spacing: -.06em; }
+    h1 span { color: oklch(0.71 0.20 30); }
+    p { min-height: 3rem; margin: .75rem 0; color: oklch(0.75 0.014 285); }
+    button { padding: .65rem 1rem; border-radius: .8rem; border: 1px solid oklch(0.38 0.02 275); background: oklch(0.24 0.015 275); color: inherit; font: inherit; cursor: pointer; }
+    @keyframes turn { 0%, 24% { transform: rotate(-8deg); } 74%, 100% { transform: rotate(352deg); } }
+    @media (prefers-reduced-motion: reduce) { .mark { animation: none; } }
+  </style>
+</head>
+<body>
+  <main id="mybike-startup-screen">
+    <div class="mark" aria-hidden="true">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22V15"/></svg>
+    </div>
+    <h1>MY<span>bike</span></h1>
+    <p id="status" role="status">Démarrage de MYbike…</p>
+    <button id="retry" type="button" hidden>Réessayer</button>
+    <noscript><a href="/?_mybike_open=1">Ouvrir MYbike</a></noscript>
+  </main>
+  <script>
+    const status = document.getElementById('status');
+    const retry = document.getElementById('retry');
+    let stopped = false;
+    let attempts = 0;
+
+    async function check() {
+      if (stopped) return;
+      attempts++;
+      const controller = new AbortController();
+      const deadline = setTimeout(() => controller.abort(), 8000);
+      try {
+        const response = await fetch('/__mybike_ready', {
+          method: 'HEAD', cache: 'no-store', signal: controller.signal,
+        });
+        if (response.ok && response.headers.get('X-MYbike-Ready') === '1') {
+          stopped = true;
+          const target = new URL(location.href);
+          target.searchParams.set('_mybike_open', '1');
+          location.replace(target.href);
+          return;
+        }
+      } catch {
+        // The server may still be waking up.
+      } finally {
+        clearTimeout(deadline);
+      }
+      status.textContent = navigator.onLine ? 'Le serveur se réveille. Encore un instant…' : 'Hors connexion. MYbike reprendra dès le retour du réseau.';
+      retry.hidden = false;
+      if (attempts < 24) setTimeout(check, 3500);
+      else status.textContent = 'MYbike met plus de temps que prévu à démarrer.';
+    }
+
+    retry.addEventListener('click', () => {
+      stopped = true;
+      const target = new URL(location.href);
+      target.searchParams.set('_mybike_open', '1');
+      location.replace(target.href);
+    });
+    setTimeout(check, 1000);
+  </script>
+</body>
+</html>

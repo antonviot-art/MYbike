@@ -49,6 +49,9 @@ function isH3SwallowedErrorBody(body: string): boolean {
 // twice and renders garbled.
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
+    if (request.method === "HEAD" && new URL(request.url).pathname === "/__mybike_ready") {
+      return new Response(null, { status: 204, headers: { "X-MYbike-Ready": "1", "Cache-Control": "no-store" } });
+    }
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
