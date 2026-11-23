@@ -291,13 +291,15 @@ input:focus, textarea:focus { outline: 1px solid var(--primary); }
 .home-hero .home-hero-profile { display: none; }
 @media (max-width: 640px) {
   .home-hero .home-hero-scene { object-fit: contain; object-position: top center; }
-  .home-hero.has-profile-hero { min-height: 290px; text-align: center; justify-items: center; }
+  .home-hero.has-profile-hero { min-height: clamp(300px, 96vw, 390px); }
   .home-hero.has-profile-hero .home-hero-scene { display: none; }
   .home-hero.has-profile-hero .home-hero-profile {
-    display: block; inset: 16px 0 auto; width: min(66%, 224px); height: 190px;
-    margin-inline: auto; object-fit: contain; object-position: center; border-radius: 18px;
+    display: block; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center 42%;
   }
-  .home-hero.has-profile-hero::after { background: linear-gradient(0deg, var(--secondary) 10%, transparent 45%); }
+  .home-hero.has-profile-hero::after {
+    background: linear-gradient(0deg, oklch(0.12 0.012 275 / .96), oklch(0.12 0.012 275 / .4) 36%, transparent 68%);
+  }
+  .home-hero.has-profile-hero h1 { max-width: 100%; text-shadow: 0 2px 12px var(--overlay); }
   .vehicle-edit-actions { position: sticky; bottom: calc(77px + env(safe-area-inset-bottom)); z-index: 3; padding: 10px; border-radius: 12px; background: var(--secondary); box-shadow: 0 -4px 18px var(--overlay); }
 }
 .ride-speed > span:nth-child(2) { font-size: 2.8rem; line-height: 1; }
@@ -313,3 +315,6 @@ input:focus, textarea:focus { outline: 1px solid var(--primary); }
   .ride-dashboard-stats { align-content: center; overflow-y: auto; }
   .ride-dashboard .ride-speed > span:nth-child(2) { font-size: clamp(4rem, 11vw, 8rem); }
 }
+
+.vehicle-gallery .vehicle-photo { display: block; height: clamp(220px, 56vw, 500px); max-height: 500px; aspect-ratio: auto; object-fit: contain; background: var(--card); }
+.vehicle-gallery div.vehicle-photo { display: grid; }

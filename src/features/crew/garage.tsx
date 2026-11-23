@@ -1,7 +1,8 @@
 ﻿import { useEffect, useState, type FormEvent } from 'react';
-import { ArrowLeft, Bike, ChevronRight, Gauge, Pencil, Timer, Wrench } from 'lucide-react';
+import { ArrowLeft, Bike, ChevronLeft, ChevronRight, Gauge, Pencil, Timer, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { Carousel, CarouselContent, CarouselItem, type CarouselApi } from '@/components/ui/carousel';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { jpeg, loadPhoto } from './photo-crop';
 import { VehicleDescription } from './vehicle-description';
@@ -22,6 +23,46 @@ function VehiclePhoto({ path, label }: { path: string; label: string }) {
   return url
     ? <img src={url} alt={label} className="vehicle-photo" onError={() => setUrl('')} />
     : <div className="vehicle-photo grid place-items-center bg-card"><Bike size={36} aria-hidden="true" /></div>;
+}
+
+function VehicleGallery({ photos, label }: { photos: string[]; label: string }) {
+  const [carousel, setCarousel] = useState<CarouselApi>();
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    if (!carousel) return;
+    const sync = () => setIndex(carousel.selectedScrollSnap());
+    sync();
+    carousel.on('select', sync).on('reInit', sync);
+    return () => { carousel.off('select', sync).off('reInit', sync); };
+  }, [carousel]);
+
+  if (photos.length <= 1) {
+    return <div className="vehicle-gallery overflow-hidden rounded-2xl"><VehiclePhoto path={photos[0] ?? ''} label={label} /></div>;
+  }
+
+  return (
+    <Carousel setApi={setCarousel} className="vehicle-gallery min-w-0" aria-label={'Photos de ' + label}>
+      <div className="overflow-hidden rounded-2xl bg-card">
+        <CarouselContent className="ml-0">
+          {photos.map((path, slide) => (
+            <CarouselItem className="pl-0" key={path} aria-label={`Photo ${slide + 1} sur ${photos.length}`}>
+              {Math.abs(index - slide) <= 1
+                ? <VehiclePhoto path={path} label={`${label}, photo ${slide + 1}`} />
+                : <div className="vehicle-photo bg-card" aria-hidden="true" />}
+            </CarouselItem>
+          ))}
+        </CarouselContent>
+      </div>
+      <div className="mt-2 flex items-center justify-center gap-3">
+        <Button type="button" variant="outline" size="icon" className="rounded-full" aria-label="Photo précédente"
+          disabled={!carousel || index === 0} onClick={() => carousel?.scrollPrev()}><ChevronLeft /></Button>
+        <span role="status" className="min-w-12 text-center text-sm tabular-nums text-muted-foreground">{index + 1} / {photos.length}</span>
+        <Button type="button" variant="outline" size="icon" className="rounded-full" aria-label="Photo suivante"
+          disabled={!carousel || index >= photos.length - 1} onClick={() => carousel?.scrollNext()}><ChevronRight /></Button>
+      </div>
+    </Carousel>
+  );
 }
 
 type Details = Vehicle & { description?: string; parts?: string; photos?: string[] };
@@ -160,11 +201,7 @@ function VehicleDetails({ record }: { record: CrewRecord }) {
         {editable && !editing && <Button className="w-full sm:w-auto" onClick={() => { setEditing(true); setConfirmDelete(false); }}><Pencil /> Modifier la fiche</Button>}
       </header>
       {!editing ? <>
-        <div className="grid grid-cols-2 gap-2 overflow-hidden rounded-xl">
-          {(photos.length ? photos : [images[vehicle.image] ?? '']).map((path, index) => (
-            <div key={path || index} className={photos.length < 2 ? 'col-span-2' : ''}><VehiclePhoto path={path} label={vehicle.name} /></div>
-          ))}
-        </div>
+        <VehicleGallery photos={photos.length ? photos : [images[vehicle.image] ?? '']} label={vehicle.name} />
         {vehicle.description && <section><h3 className="font-semibold">Description</h3><p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">{vehicle.description}</p></section>}
         {vehicle.parts && <section><h3 className="font-semibold">Pièces et équipement</h3><p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">{vehicle.parts}</p></section>}
         {editable && <>
