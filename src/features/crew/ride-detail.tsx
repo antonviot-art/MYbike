@@ -9,6 +9,7 @@ import { resolveMedia, useCrew } from './context';
 import { DifficultyBadge, RideFavorite, RideStats, TrackMap } from './rides';
 import { createRideSpeed } from './ride-speed';
 import type { RouteManeuver, SuggestedRide } from './valhalla.server';
+import type { livePilots } from './live-location';
 import { metersBetween, routeProgress, readSegments, readStops, type TrackPoint } from './tracks';
 import { CircuitRecorder, formatLap, LapComparison, LapResults, readLapTimes } from './circuit-recorder';
 import type { CrewRecord } from './data';
@@ -25,7 +26,10 @@ export function RideDetailPage({ rideId, start = false }: { rideId: string; star
   </CrewShell>;
 }
 
-function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRecord[]; start: boolean }) {
+export function RideDetail({ ride, photos, start, convoy }: {
+  ride: CrewRecord; photos: CrewRecord[]; start: boolean;
+  convoy?: { target: TrackPoint | undefined; pilots: ReturnType<typeof livePilots>; onClose: () => void; join: boolean; paused: boolean; togglePause?: (() => void) | undefined };
+}) {
   const { payload } = ride;
   const { records, add, user } = useCrew();
   const isCircuit = payload['circuit'] === true || readLapTimes(payload['laps']).length > 0;
@@ -36,10 +40,11 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
   const originalSegments = useMemo(() => readSegments(payload['segments']), [payload]);
   const [returnRoute, setReturnRoute] = useState<SuggestedRide>();
   const [returning, setReturning] = useState(false);
+  const joinRequested = useRef(false);
   const segments = useMemo(() => returnRoute ? [returnRoute.points] : originalSegments, [returnRoute, originalSegments]);
   const stops = useMemo(() => readStops(payload['stops']), [payload]);
-  const [following, setFollowing] = useState(start && segments.length > 0);
-  const [dashboard, setDashboard] = useState(start && segments.length > 0);
+  const [following, setFollowing] = useState(start && (segments.length > 0 || Boolean(convoy)));
+  const [dashboard, setDashboard] = useState(start && (segments.length > 0 || Boolean(convoy)));
   const [voice, setVoice] = useState(false);
   const [voiceAvailable, setVoiceAvailable] = useState(false);
   const [speed, setSpeed] = useState<number>();
@@ -67,7 +72,7 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
     }, failure => {
       if (!active) return;
       setError(failure.code === 1 ? 'Autorise la localisation pour suivre la trace.' : 'En attente d’un meilleur signal GPS.');
-      if (failure.code === 1) { setFollowing(false); setDashboard(false); }
+      if (failure.code === 1) setFollowing(false);
     }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 });
     return () => { active = false; window.clearTimeout(timeout); navigator.geolocation.clearWatch(id); };
   }, [following]);
@@ -77,7 +82,7 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
   const movingDistance = Number(motion?.meters);
   const motionStats = movingTime > 0 && Number.isFinite(movingTime) && Number.isFinite(movingDistance)
     ? { milliseconds: movingTime, meters: movingDistance } : undefined;
-  const progress = position && position.accuracy <= 35 ? routeProgress(position.point, segments) : undefined;
+  const progress = segments.length && position && position.accuracy <= 35 ? routeProgress(position.point, segments) : undefined;
   const distanceToRoute = progress?.distance;
   const offRoute = progress !== undefined && progress.distance > 65;
   const steps = useMemo(() => {
@@ -130,7 +135,7 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
       url: '/medias?post=' + encodeURIComponent(photo.id) }] : [];
   });
   async function goBackToStart() {
-    const destination = originalSegments[0]?.[0];
+    const destination = convoy?.target ?? originalSegments[0]?.[0];
     if (!position || !destination || returning) return;
     setReturning(true);
     try {
@@ -140,9 +145,15 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
       if (!response.ok) throw new Error();
       setReturnRoute(await response.json() as SuggestedRide);
       lastSpoken.current = undefined;
-    } catch { toast.error('Le retour au départ n’a pas pu être calculé.'); }
+    } catch { toast.error(convoy ? 'Le trajet vers le regroupement est indisponible.' : 'Le retour au départ n’a pas pu être calculé.'); }
     finally { setReturning(false); }
   }
+
+  useEffect(() => {
+    if (!convoy?.join || !convoy.target || !position || position.accuracy > 35 || joinRequested.current) return;
+    joinRequested.current = true;
+    void goBackToStart();
+  });
 
   const ranking = new Map<string, { name: string; best: number; vehicle: string; sessions: CrewRecord[] }>();
   if (publicCircuit) for (const result of [ride, ...records.filter(item => item.kind === 'circuit-lap' && item.payload['circuitId'] === ride.id)]) {
@@ -171,10 +182,10 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
   const maxSpeed = typeof payload['maxSpeed'] === 'number' ? payload['maxSpeed'] : undefined;
 
   return <>
-    {dashboard && <section className="ride-dashboard" data-layout="balanced" aria-label="Compteur et guidage" onKeyDown={event => { if (event.key === 'Escape') setDashboard(false); }}>
+    {dashboard && <section className="ride-dashboard" data-layout="balanced" aria-label="Compteur et guidage" onKeyDown={event => { if (event.key === 'Escape') { if (convoy) convoy.onClose(); else setDashboard(false); } }}>
       <div className="ride-dashboard-stats">
         <div className="flex w-full items-center justify-between gap-2">
-          <Button variant="outline" size="icon" autoFocus aria-label="Fermer le compteur" onClick={() => setDashboard(false)}><X /></Button>
+          <Button variant="outline" size="icon" autoFocus aria-label="Fermer le compteur" onClick={() => { if (convoy) convoy.onClose(); else setDashboard(false); }}><X /></Button>
           {voiceAvailable && steps.length > 0 && <Button size="sm" variant={voice ? 'default' : 'outline'} aria-pressed={voice} onClick={() => { lastSpoken.current = undefined; setVoice(!voice); }}><Volume2 /> Voix</Button>}
         </div>
         <div className="ride-speed"><Gauge size={24} aria-hidden="true" /><span className="font-display font-bold tabular-nums">{speed === undefined ? '—' : Math.round(speed)}</span><span className="text-sm">km/h</span></div>
@@ -182,18 +193,20 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
           <TurnIcon size={34} aria-hidden="true" />
           <strong className={offRoute ? 'text-primary' : ''}>{error || (offRoute ? 'Hors de la trace · ' + Math.round(progress.distance) + ' m'
             : arrived ? 'Arrivée à proximité' : !position ? 'Recherche de ta position…'
-              : !progress ? 'Signal GPS faible' : nextStep?.instruction || 'Suis la trace sur la carte')}</strong>
+              : !progress ? (segments.length ? 'Signal GPS faible' : 'Aucun itinéraire associé · rejoins le regroupement') : nextStep?.instruction || 'Suis la trace sur la carte')}</strong>
           {nextStep && !arrived && turnDistance !== undefined && <span>{turnDistance > 0 ? 'Dans ' + turnDistance + ' m' : 'Maintenant'}</span>}
           {arrival && <span className="text-sm">Arrivée vers {arrival}</span>}
           {progress && <span className="text-sm text-muted-foreground">{(progress.remaining / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km restants sur la trace</span>}
         </div>
-        <Button size="sm" variant="outline" disabled={returning || !position || position.accuracy > 35} onClick={() => {
+        {convoy?.togglePause && <Button size="sm" variant="outline" aria-pressed={convoy.paused} onClick={convoy.togglePause}>{convoy.paused ? 'Je repars' : 'Je fais une pause'}</Button>}
+        <Button size="sm" variant="outline" disabled={returning || !position || position.accuracy > 35 || Boolean(convoy && !convoy.target)} onClick={() => {
           if (returnRoute) { setReturnRoute(undefined); lastSpoken.current = undefined; } else void goBackToStart();
-        }}>{returning ? 'Calcul du retour…' : returnRoute ? 'Reprendre le trajet initial' : 'Retour au départ'}</Button>
-        <Button size="sm" variant="outline" onClick={() => { setFollowing(false); setDashboard(false); setSpeed(undefined); }}>Arrêter le guidage</Button>
+        }}>{returning ? 'Calcul en cours…' : returnRoute ? 'Reprendre le trajet initial' : convoy ? 'Rejoindre le regroupement' : 'Retour au départ'}</Button>
+        <Button size="sm" variant="outline" onClick={() => { setFollowing(false); setDashboard(false); setSpeed(undefined); convoy?.onClose(); }}>Arrêter le guidage</Button>
       </div>
-      <TrackMap segments={segments} stops={stops} photoMarkers={photoMarkers} position={position} follow={following} />
+      <TrackMap segments={segments} stops={convoy?.target ? [...stops, { point: convoy.target, label: 'Regroupement' }] : stops} photoMarkers={photoMarkers} position={position} follow={following} pilots={convoy?.pilots ?? []} />
     </section>}
+    {!convoy && <>
     <section className="ride-record grid gap-4">
       <header>
         <h2 className="font-display text-4xl font-bold">{String(payload['name'] ?? 'Parcours')}</h2>
@@ -258,6 +271,7 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
       {photos.length ? <div className="media-grid">{photos.map(photo => <RidePhoto key={photo.id} photo={photo} />)}</div>
         : <p className="text-muted-foreground">Aucune photo associée à ce parcours.</p>}
     </section>
+    </>}
   </>;
 }
 

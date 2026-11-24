@@ -1,11 +1,13 @@
 import { lazy, Suspense, useEffect, useState, type FormEvent } from 'react';
 import { ClientOnly, Link } from '@tanstack/react-router';
-import { CalendarDays, ImagePlus, LocateFixed, MapPin, Plus, Route, Share2 } from 'lucide-react';
+import { CalendarDays, ImagePlus, Gauge, Pause, UsersRound, LocateFixed, MapPin, Plus, Route, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { CrewShell } from './shell';
 import { resolveMedia, useCrew } from './context';
+import { RideDetail } from './ride-detail';
+import { livePilots } from './live-location';
 import type { CrewRecord } from './data';
 import { readSegments, type TrackPoint } from './tracks';
 
@@ -220,6 +222,7 @@ function RassoCard({ event, highlighted }: { event: CrewRecord; highlighted: boo
       <summary className="cursor-pointer">Voir les réponses</summary>
       <ul className="mt-2 grid gap-1">{[...votes.entries()].map(([id, vote]) => <li key={id}>{vote.name} · {vote.answer}</li>)}</ul>
     </details>}
+    <RassoConvoy event={event} route={ride || undefined} point={point} host={host && Boolean(user)} participantIds={[...(event.author_id ? [event.author_id] : []), ...[...votes].filter(([, vote]) => vote.answer === 'Présent').map(([id]) => id)]} />
     <RassoAlbum eventId={event.id} canContribute={Number.isFinite(when.getTime()) && when.getTime() <= Date.now() && (host || votes.get(viewer)?.answer === 'Présent')} />
     {host && (deleting ? <div className="flex flex-wrap gap-2">
       <Button variant="destructive" size="sm" disabled={busy} onClick={deleteEvent}>Confirmer la suppression</Button>
@@ -293,4 +296,71 @@ function RassoAlbumItem({ item }: { item: CrewRecord }) {
       : <p className="text-sm text-muted-foreground">{failed ? 'Média indisponible' : 'Chargement…'}</p>}
     <figcaption className="mt-1 break-words text-xs text-muted-foreground">{author}</figcaption>
   </figure>;
+}
+
+
+function RassoConvoy({ event, route, point, host, participantIds }: {
+  event: CrewRecord; route?: CrewRecord | undefined; point?: TrackPoint | undefined; host: boolean; participantIds: string[];
+}) {
+  const { user, records, add, name, positionClock, sharing } = useCrew();
+  const [open, setOpen] = useState<'dashboard' | 'join'>();
+  const [selecting, setSelecting] = useState(false);
+  const [candidate, setCandidate] = useState<TrackPoint>();
+  const [busy, setBusy] = useState(false);
+  if (!user) return null;
+
+  const shared = records.filter(record => record.payload['rassoId'] === event.id);
+  const regroup = shared.filter(record => record.kind === 'convoy-regroup' && record.author_id === event.author_id).at(-1);
+  const target = readSegments([[regroup?.payload['point']]])[0]?.[0] ?? point;
+  const pauses = new Map<string, { paused: boolean; name: string }>();
+  for (const record of shared) {
+    if (record.kind === 'convoy-pause' && record.author_id && participantIds.includes(record.author_id)) {
+      pauses.set(record.author_id, { paused: record.payload['paused'] === true, name: String(record.payload['name'] || 'Pilote') });
+    }
+  }
+  const canPause = participantIds.includes(user.id);
+  const paused = pauses.get(user.id)?.paused === true;
+  const pilots = livePilots(records.flatMap(record => {
+    if (record.kind !== 'live-position' || !record.author_id || !participantIds.includes(record.author_id)) return [];
+    if (!pauses.get(record.author_id)?.paused) return [record];
+    return [{ ...record, payload: { ...record.payload, label: String(record.payload['label'] || 'Pilote') + ' · En pause' } }];
+  }), positionClock, user.id);
+  const riding: CrewRecord = route ?? { id: event.id, kind: 'ride-track', payload: { name: event.payload['title'] } };
+
+  async function togglePause() {
+    if (busy || !canPause) return;
+    setBusy(true);
+    try {
+      await add('convoy-pause', { rassoId: event.id, paused: !paused, name });
+      toast.success(paused ? 'Reprise signalée.' : 'Pause signalée au convoi.');
+    } catch { toast.error('Impossible de signaler ton statut.'); }
+    finally { setBusy(false); }
+  }
+
+  async function saveRegroup() {
+    if (busy || !host || !candidate) return;
+    setBusy(true);
+    try { await add('convoy-regroup', { rassoId: event.id, point: candidate }); setSelecting(false); setCandidate(undefined); }
+    catch { toast.error('Le point de regroupement n’a pas été enregistré.'); }
+    finally { setBusy(false); }
+  }
+
+  return <section className="grid gap-3 rounded-xl border border-border p-3">
+    <h3 className="flex items-center gap-2 font-semibold"><UsersRound size={18} /> Convoi du rasso</h3>
+    <div className="flex flex-wrap gap-2">
+      <Button size="sm" onClick={() => setOpen('dashboard')}><Gauge /> Ouvrir le compteur</Button>
+      {target && <Button size="sm" variant="outline" onClick={() => setOpen('join')}><Route /> Rejoindre le convoi</Button>}
+      {canPause && <Button size="sm" variant="outline" disabled={busy} aria-pressed={paused} onClick={() => void togglePause()}><Pause /> {paused ? 'Je repars' : 'Je fais une pause'}</Button>}
+      {host && <Button size="sm" variant="outline" onClick={() => setSelecting(!selecting)}><MapPin /> {selecting ? 'Annuler' : 'Choisir le regroupement'}</Button>}
+    </div>
+    {target && <p className="text-sm text-muted-foreground">{regroup ? 'Point de regroupement défini par l’organisateur.' : 'Le rendez-vous sert de point de regroupement.'}</p>}
+    {[...pauses.values()].some(entry => entry.paused) && <p className="text-sm">En pause · {[...pauses.values()].filter(entry => entry.paused).map(entry => entry.name).join(', ')}</p>}
+    {canPause && paused && !sharing && <p className="text-sm text-muted-foreground">Ta pause est signalée. Tu peux activer le partage de position dans Plan.</p>}
+    {selecting && <div className="grid gap-2"><p className="text-sm">Touche la carte pour choisir où le groupe se retrouve.</p>
+      <MeetingMap point={candidate ?? target} label="Regroupement" onPoint={setCandidate} />
+      <Button size="sm" className="justify-self-start" disabled={!candidate || busy} onClick={() => void saveRegroup()}>Partager ce point</Button>
+    </div>}
+    {open && <RideDetail ride={riding} photos={[]} start convoy={{ target, pilots, onClose: () => setOpen(undefined), join: open === 'join', paused,
+      togglePause: canPause && !busy ? () => void togglePause() : undefined }} />}
+  </section>;
 }
