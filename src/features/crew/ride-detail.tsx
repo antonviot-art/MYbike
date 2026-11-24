@@ -262,8 +262,13 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
 }
 
 function CircuitSession({ payload }: { payload: CrewRecord['payload'] }) {
+  const heat = payload['heat'] as { name?: unknown; mode?: unknown; seconds?: unknown; laps?: unknown; completed?: unknown } | undefined;
+  const duration = typeof heat?.seconds === 'number' ? Math.round(heat.seconds / 60) + ' min' : '';
+  const tours = typeof heat?.laps === 'number' ? heat.laps + ' tour(s)' : '';
+  const format = heat?.mode === 'time-laps' ? duration + ' + ' + tours : heat?.mode === 'time' ? duration : heat?.mode === 'laps' ? tours : '';
   const details = [payload['vehicleName'], payload['surface']].filter(value => typeof value === 'string' && value.trim()).join(' · ');
   return <div className="grid gap-2">
+    {format && <p className="text-sm font-semibold">{typeof heat?.name === 'string' && heat.name ? heat.name : 'Manche'} · {format} · {heat?.completed === true ? 'Terminée' : 'Interrompue'}</p>}
     {details && <p className="text-sm text-muted-foreground">{details}</p>}
     {typeof payload['sessionNotes'] === 'string' && payload['sessionNotes'] && <p className="whitespace-pre-wrap break-words text-sm">{payload['sessionNotes']}</p>}
     <LapResults value={payload['laps']} />

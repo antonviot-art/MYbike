@@ -31,6 +31,9 @@ export function LapResults({ value }: { value: unknown }) {
   </div>;
 }
 
+type HeatMode = 'free' | 'laps' | 'time' | 'time-laps';
+type Heat = { mode: HeatMode; seconds: number; laps: number; name: string };
+
 type LapSample = [number, number, number];
 type LapTrace = LapSample[];
 
@@ -110,6 +113,16 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
   const sessionVehicle = useRef({ id: '', name: '' });
   const gate = useRef<{ start: TrackPoint; lastCrossing: number; away: boolean; firstLap: TrackPoint[]; loopComplete: boolean; checkpoint: number; previous?: { distance: number; timestamp: number } } | undefined>(undefined);
   const [delay, setDelay] = useState(10);
+  const [heatMode, setHeatMode] = useState<HeatMode>('free');
+  const [heatMinutes, setHeatMinutes] = useState(15);
+  const [heatLaps, setHeatLaps] = useState(2);
+  const [heatName, setHeatName] = useState('');
+  const heat = useRef<Heat>({ mode: 'free', seconds: 0, laps: 0, name: '' });
+  const heatStart = useRef<number | undefined>(undefined);
+  const lapCount = useRef(0);
+  const extraLapStart = useRef<number | undefined>(undefined);
+  const timeSignal = useRef(false);
+  const [completed, setCompleted] = useState(false);
   const [remaining, setRemaining] = useState<number>();
   const [laps, setLaps] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
@@ -123,6 +136,7 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
       const start = circuitPoints?.[0] ?? point;
       if (metersBetween(start, point) > 15) return;
       samples.current = [[point[0], point[1], 0]];
+      heatStart.current = timestamp;
       gate.current = { start, lastCrossing: timestamp, away: false, firstLap: [point], loopComplete: false, checkpoint: 0 };
       return;
     }
@@ -157,6 +171,12 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
       samples.current = [[point[0], point[1], 0]];
       setLapTraces(previousTraces => [...previousTraces, trace]);
       setLaps(previousLaps => [...previousLaps, duration]);
+      const count = ++lapCount.current;
+      if (heat.current.mode === 'laps' && count >= heat.current.laps) setCompleted(true);
+      if (heat.current.mode === 'time-laps' && heatStart.current !== undefined && crossing >= heatStart.current + heat.current.seconds * 1000) {
+        if (extraLapStart.current === undefined) extraLapStart.current = count;
+        else if (count - extraLapStart.current >= heat.current.laps) setCompleted(true);
+      }
     }
   });
   const active = draft.recording || remaining !== undefined;
@@ -175,17 +195,38 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
   }, [counting]);
 
   useEffect(() => {
-    if (!dashboard || !draft.recording) return;
+    if (!draft.recording || (!dashboard && heat.current.mode === 'free')) return;
     setClock(Date.now());
     const interval = window.setInterval(() => setClock(Date.now()), 200);
     return () => window.clearInterval(interval);
   }, [dashboard, draft.recording]);
+
+  const heatElapsed = heatStart.current === undefined ? 0 : Math.max(0, clock - heatStart.current);
+  const timeRemaining = Math.max(0, heat.current.seconds * 1000 - heatElapsed);
+  useEffect(() => {
+    if (!draft.recording || heatStart.current === undefined || timeRemaining > 0 || timeSignal.current ||
+        (heat.current.mode !== 'time' && heat.current.mode !== 'time-laps')) return;
+    timeSignal.current = true;
+    navigator.vibrate?.([180, 100, 180]);
+    if (heat.current.mode === 'time') setCompleted(true);
+  }, [draft.recording, timeRemaining]);
+  useEffect(() => {
+    if (!completed || !draft.recording) return;
+    draft.stop();
+    navigator.vibrate?.([350, 150, 350]);
+  }, [completed, draft.recording, draft.stop]);
 
   function arm() {
     if (active || blocked) return;
     if (!navigator.geolocation) { toast.error('GPS indisponible.'); return; }
     draft.clear();
     gate.current = undefined;
+    heat.current = { mode: heatMode, seconds: heatMinutes * 60, laps: heatLaps, name: heatName.trim() };
+    heatStart.current = undefined;
+    lapCount.current = 0;
+    extraLapStart.current = undefined;
+    timeSignal.current = false;
+    setCompleted(false);
     setLaps([]);
     setLapTraces([]);
     sessionVehicle.current = { id: vehicle?.id ?? '', name: vehicleName };
@@ -208,7 +249,7 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
     const title = circuit ? String(circuit.payload['name'] ?? 'Boucle') : String(form.get('title') ?? '').trim();
     if (!title) return;
     setSaving(true);
-    const metadata = { lapTraces, surface, sessionNotes: notes.trim(), vehicleId: sessionVehicle.current.id, vehicleName: sessionVehicle.current.name };
+    const metadata = { ...(heat.current.mode !== 'free' ? { heat: { ...heat.current, completed } } : {}), lapTraces, surface, sessionNotes: notes.trim(), vehicleId: sessionVehicle.current.id, vehicleName: sessionVehicle.current.name };
     try {
       if (circuit) {
         if (!user) throw new Error('Connecte-toi pour publier tes chronos.');
@@ -222,6 +263,7 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
       draft.clear();
       setLaps([]);
       setLapTraces([]);
+      setCompleted(false);
       setNotes('');
       setSurface('');
       toast.success(circuit ? 'Chronos ajoutés au classement.' : 'Boucle et chronos enregistrés dans Mes parcours.');
@@ -229,6 +271,11 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
     finally { setSaving(false); }
   }
 
+  const heatStatus = completed ? 'Manche terminée' : draft.recording && heat.current.mode !== 'free' ? (
+    heat.current.mode === 'laps' ? Math.max(0, heat.current.laps - laps.length) + ' tour(s) restant(s)' : timeRemaining > 0 ? 'Temps restant · ' + formatLap(timeRemaining)
+      : extraLapStart.current === undefined ? 'Temps écoulé · tours supplémentaires après le prochain passage'
+        : Math.max(0, heat.current.laps - (laps.length - extraLapStart.current)) + ' tour(s) supplémentaire(s) restant(s)'
+  ) : '';
   const controls = remaining !== undefined ? <div className="flex items-center gap-3">
       <strong role="status" className="text-3xl tabular-nums">{remaining} s</strong>
       <Button variant="outline" onClick={() => { window.clearInterval(timer.current); setRemaining(undefined); }}>Annuler</Button>
@@ -237,6 +284,12 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
       <Button className="justify-self-start" onClick={draft.stop}><Flag /> Terminer la session</Button>
     </div> : <div className="flex flex-wrap items-end gap-2">
       {vehicles.length > 0 && <label className="grid gap-1 text-sm">Moto du chrono<select value={vehicleId} disabled={laps.length > 0} onChange={event => setVehicleId(event.currentTarget.value)}><option value="">Moto non renseignée</option>{vehicles.map(item => <option key={item.id} value={item.id}>{String(item.payload['name'] ?? 'Moto')}</option>)}</select></label>}
+      <label className="grid gap-1 text-sm">Format de session<select value={heatMode} onChange={event => setHeatMode(event.currentTarget.value as HeatMode)}>
+        <option value="free">Chrono libre</option><option value="laps">Nombre de tours</option><option value="time">Durée fixe</option><option value="time-laps">Durée + tours</option>
+      </select></label>
+      {heatMode !== 'free' && <label className="grid gap-1 text-sm">Nom de la manche<input value={heatName} onChange={event => setHeatName(event.currentTarget.value)} maxLength={60} placeholder="Ex. Mini-championnat · Manche 1" /></label>}
+      {(heatMode === 'time' || heatMode === 'time-laps') && <label className="grid gap-1 text-sm">Durée (min)<select value={heatMinutes} onChange={event => setHeatMinutes(Number(event.currentTarget.value))}>{[1, 2, 3, 5, 10, 15, 20, 30, 45, 60].map(minutes => <option key={minutes}>{minutes}</option>)}</select></label>}
+      {(heatMode === 'laps' || heatMode === 'time-laps') && <label className="grid gap-1 text-sm">{heatMode === 'time-laps' ? 'Tours supplémentaires' : 'Nombre de tours'}<select value={heatLaps} onChange={event => setHeatLaps(Number(event.currentTarget.value))}>{Array.from({ length: 20 }, (_, index) => <option key={index}>{index + 1}</option>)}</select></label>}
       <label className="grid gap-1 text-sm">Compte à rebours<select value={delay} onChange={event => setDelay(Number(event.target.value))}>
         <option value={0}>Départ immédiat</option><option value={5}>5 secondes</option><option value={10}>10 secondes</option><option value={30}>30 secondes</option><option value={60}>1 minute</option><option value={120}>2 minutes</option><option value={300}>5 minutes</option>
       </select></label>
@@ -257,6 +310,7 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
     <p className="text-sm text-muted-foreground">Garde MYbike au premier plan. Le suivi et la vibration peuvent s’interrompre si le téléphone se verrouille.</p>
     {blocked && <p className="text-sm">Arrête ton enregistrement en cours pour lancer le chrono.</p>}
     <Button variant="outline" className="justify-self-start" onClick={() => setDashboard(true)}><Gauge /> Ouvrir le compteur</Button>
+    {!dashboard && heatStatus && <p className="font-semibold">{heatStatus}</p>}
     {!dashboard && controls}
     <LapResults value={laps} />
     <Dialog open={dashboard} onOpenChange={setDashboard}>
@@ -279,6 +333,7 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
           </div>
           {showMap && <div className="circuit-mini-map"><TrackMap segments={circuitPoints ? [circuitPoints] : draft.segments} position={draft.position} /></div>}
         </div>
+        {heatStatus && <p className="rounded-lg bg-secondary p-3 font-semibold">{heatStatus}</p>}
         {controls}
         <LapResults value={laps} />
         {!active && laps.length > 0 && <Button variant="outline" onClick={() => setDashboard(false)}>Fermer pour enregistrer les chronos</Button>}
