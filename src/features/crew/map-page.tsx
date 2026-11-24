@@ -41,7 +41,7 @@ export function MapPage() {
   const [savedOpen, setSavedOpen] = useState(false);
   const [savingRoute, setSavingRoute] = useState(false);
   const [preference, setPreference] = useState<RoutePreference>('mixed');
-  const [suggested, setSuggested] = useState<SuggestedRide>();
+  const [suggested, setSuggested] = useState<SuggestedRide & { viaOffset: number }>();
   const [routeBusy, setRouteBusy] = useState(false);
   const [routeError, setRouteError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -81,7 +81,10 @@ export function MapPage() {
   ];
   const routeMarkers = [
     ...(routeStart ? [{ lat: routeStart[0], lng: routeStart[1], label: 'Départ', category: 'other', color: '#15803d' }] : []),
-    ...via.map(([lat, lng], index) => ({ lat, lng, label: 'Passage ' + (index + 1), badge: String(index + 1), color: '#2563eb', onRemove: () => removePassage(index) })),
+    ...via.map((point, index) => {
+      const [lat, lng] = (suggested && suggested.snappedStops[index - suggested.viaOffset]) ?? point;
+      return { lat, lng, label: 'Passage ' + (index + 1), badge: String(index + 1), color: '#2563eb', onRemove: () => removePassage(index) };
+    }),
     ...(routeEnd ? [{ lat: routeEnd[0], lng: routeEnd[1], label: 'Destination', category: 'rasso', color: '#dc2626' }] : []),
   ];
   const sharedPaths = category === 'all' ? records.filter(record => record.kind === 'ride-track' && record.payload['visibility'] !== 'private' && record.payload['communityTrail'] === true).map(record => ({
@@ -187,7 +190,7 @@ export function MapPage() {
     setRouteError('');
     try {
       const chunkSize = maxValhallaStops - 1;
-      const combined: SuggestedRide = { points: [], km: 0, seconds: 0, directions: [] };
+      const combined: SuggestedRide = { points: [], km: 0, seconds: 0, directions: [], snappedStops: [] };
       let departure = start;
       for (let index = 0; index < stops.length; index += chunkSize) {
         const chunk = stops.slice(index, index + chunkSize);
@@ -217,10 +220,11 @@ export function MapPage() {
         combined.km += part.km;
         combined.seconds += part.seconds;
         combined.directions.push(...part.directions);
+        combined.snappedStops.push(...(part.snappedStops ?? []));
         departure = last;
         if (index + chunkSize < stops.length) await new Promise(resolve => window.setTimeout(resolve, 1250));
       }
-      setSuggested(combined);
+      setSuggested({ ...combined, viaOffset: preferredStart ? 0 : 1 });
     } catch { setRouteError('Le calcul est indisponible pour le moment.'); }
     finally { setRouteBusy(false); }
   }
@@ -376,7 +380,7 @@ export function MapPage() {
               </form>
               <ol className="grid list-decimal gap-1 pl-5">{suggested.directions.map((step, index) => <li key={index}>{step}</li>)}</ol>
             </>}
-            <p className="text-xs text-muted-foreground">En mode Chemins privilégiés, Valhalla peut choisir la route. La punaise au bord de la carte permet de placer tes passages sur les chemins ouverts aux motos.</p>
+            <p className="text-xs text-muted-foreground">En mode Chemins privilégiés, Valhalla peut choisir la route. La punaise permet de choisir tes passages. Le calcul ajuste les repères sur les voies accessibles à moto à proximité.</p>
             <p className="text-xs text-muted-foreground">Calcul Valhalla · FOSSGIS · <a className="underline" href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a></p>
           </div>
         </DialogContent>

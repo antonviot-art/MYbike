@@ -7,7 +7,7 @@ const profiles = {
 } as const;
 
 export type RoutePreference = keyof typeof profiles;
-export type SuggestedRide = { points: TrackPoint[]; km: number; seconds: number; directions: string[] };
+export type SuggestedRide = { points: TrackPoint[]; km: number; seconds: number; directions: string[]; snappedStops: TrackPoint[] };
 
 const cache = new Map<string, { expires: number; route: SuggestedRide }>();
 let lastRequest = 0;
@@ -65,7 +65,7 @@ export async function routingResponse(request: Request) {
   const entry = cache.get(key);
   if (entry && entry.expires > Date.now()) return reply(entry.route);
   if (running || Date.now() - lastRequest < 1200) return reply({ error: 'busy' }, 429);
-  const passageTolerance = preference === 'trails' ? 30 : 75;
+  const passageTolerance = 250;
   lastRequest = Date.now();
   running = true;
 
@@ -75,8 +75,8 @@ export async function routingResponse(request: Request) {
       headers: { 'Content-Type': 'application/json', 'X-Client-Id': 'mybikee.onrender.com' },
       signal: AbortSignal.timeout(12000),
       body: JSON.stringify({
-        locations: locations.map(([lat, lon], index) => ({ lat, lon, type: 'break',
-          ...(index > 0 && (index < locations.length - 1 || input.strictEnd === true) ? { radius: Math.min(30, passageTolerance), search_cutoff: passageTolerance } : {}),
+        locations: locations.map(([lat, lon]) => ({ lat, lon, type: 'break',
+          radius: 0, search_cutoff: passageTolerance, rank_candidates: true,
         })),
         costing: 'motorcycle', costing_options: { motorcycle: profiles[preference] },
         units: 'km', language: 'fr-FR',
@@ -106,6 +106,7 @@ export async function routingResponse(request: Request) {
     const route: SuggestedRide = {
       points: shapes.flatMap((shape, index) => index ? shape.slice(1) : shape),
       km: summary.length, seconds: summary.time,
+      snappedStops: shapes.flatMap(shape => { const arrival = shape.at(-1); return arrival ? [arrival] : []; }),
       directions: legs.flatMap(leg => (leg.maneuvers ?? []).map(step => step.instruction)),
     };
     if (route.points.length < 2) return reply({ error: 'no-route' }, 404);
