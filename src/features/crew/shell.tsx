@@ -1,4 +1,4 @@
-﻿import { useState, type FormEvent, type ReactNode } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Bike, CalendarDays, Flag, House, Images, LockKeyhole, Map, MessageSquare, Route as RouteIcon, Settings, UserRound } from 'lucide-react';
@@ -43,10 +43,10 @@ export function Avatar({ pilot, size = '', userId }: { pilot: string; size?: str
   </span>;
 }
 
-export function CrewShell({ tab, immersive = false, children }: { tab: string; immersive?: boolean; children: ReactNode }) {
+export function CrewShell({ tab, immersive = false, signInOnOpen = false, children }: { tab: string; immersive?: boolean; signInOnOpen?: boolean; children: ReactNode }) {
   const { user, firstName, loading, upload } = useCrew();
   const queryClient = useQueryClient();
-  const [auth, setAuth] = useState(false);
+  const [auth, setAuth] = useState(signInOnOpen);
   const [register, setRegister] = useState(false);
   const [notice, setNotice] = useState('');
   const [settings, setSettings] = useState<false | 'menu' | 'profile' | 'account'>(false);

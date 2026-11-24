@@ -1,5 +1,5 @@
-﻿import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, BarChart3, Camera, Copy, MapPin, MessageSquare, Mic, Plus, Send, Square, UsersRound } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { ArrowLeft, BarChart3, Camera, Copy, MapPin, MessageSquare, Mic, Plus, Send, Square, UserPlus, UsersRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { Link } from '@tanstack/react-router';
 import { Button } from '@/components/ui/button';
@@ -55,10 +55,10 @@ async function prepareRoomPhoto(form: FormData) {
   return croppedAvatar(file, form);
 }
 
-export function ChatPage() {
+export function ChatPage({ invite }: { invite?: string | undefined }) {
   const { user, records, add, refresh, upload, name } = useCrew();
   const [selected, setSelected] = useState('');
-  const [menu, setMenu] = useState<'group' | 'create' | 'join' | 'photo'>();
+  const [menu, setMenu] = useState<'group' | 'create' | 'join' | 'photo' | undefined>(invite ? 'join' : undefined);
   const [shared, setShared] = useState<{ userId: string; rooms: SharedRoom[] }>();
   const [busy, setBusy] = useState(false);
   const userId = user?.id;
@@ -121,7 +121,10 @@ export function ChatPage() {
         group = 'room:' + id;
         setShared({ userId, rooms: await socialCall('mybike_rooms_list', {}) });
       } else {
-        const code = crypto.randomUUID().replaceAll('-', '').slice(0, 10).toUpperCase();
+        let code: string;
+        do {
+          code = crypto.randomUUID().slice(0, 6).toUpperCase();
+        } while (records.some(record => record.kind === 'demo-room' && record.payload['code'] === code));
         await add('demo-room', { label, code, createdHere: true, ...(photo ? { photo: await upload(photo, 'jpg') } : {}) });
         toast.success('Groupe créé. Code de démo : ' + code);
         setMenu(undefined);
@@ -185,7 +188,7 @@ export function ChatPage() {
   }
 
   return (
-    <CrewShell tab="Discussion" immersive={Boolean(current)}>
+    <CrewShell tab="Discussion" immersive={Boolean(current)} signInOnOpen={Boolean(invite)}>
       {current ? <Conversation key={current.id} room={current} onBack={() => setSelected('')} onPhoto={() => setMenu('photo')} /> : (
         <div className="grid max-w-2xl gap-4">
           <Button size="sm" variant="outline" className="justify-self-start rounded-full" onClick={() => setMenu('group')}>
@@ -198,7 +201,7 @@ export function ChatPage() {
           ))}
         </div>
       )}
-      <Dialog open={Boolean(menu)} onOpenChange={open => { if (!open && !busy) setMenu(undefined); }}>
+      <Dialog open={Boolean(menu && !(menu === 'join' && invite && !user))} onOpenChange={open => { if (!open && !busy) setMenu(undefined); }}>
         {menu && <DialogContent className="max-h-[90dvh] max-w-sm overflow-y-auto">
           <DialogTitle>{menu === 'group' ? 'Groupe' : menu === 'join' ? 'Rejoindre un groupe' : menu === 'create' ? 'Créer un groupe' : 'Modifier la photo du groupe'}</DialogTitle>
           {menu === 'group' ? <>
@@ -208,9 +211,9 @@ export function ChatPage() {
               <Button variant="outline" onClick={() => setMenu('join')}>Rejoindre un groupe</Button>
             </div>
           </> : menu === 'join' ? <>
-            <DialogDescription>Saisis le code partagé par un membre.</DialogDescription>
+            <DialogDescription>{invite ? 'Confirme pour rejoindre le groupe qui t’a invité.' : 'Saisis le code partagé par un membre.'}</DialogDescription>
             <form className="grid gap-3" onSubmit={joinRoom}>
-              <input name="code" aria-label="Code du groupe" placeholder="Code du groupe" autoCapitalize="characters" autoComplete="off" required />
+              <input name="code" aria-label="Code du groupe" placeholder="Code du groupe" defaultValue={invite} maxLength={16} autoCapitalize="characters" autoComplete="off" required />
               <Button disabled={busy}>Rejoindre</Button>
             </form>
             <Button variant="ghost" onClick={() => setMenu('group')} disabled={busy}>Retour</Button>
@@ -275,6 +278,22 @@ function Conversation({ room, onBack, onPhoto }: { room: Room; onBack: () => voi
       setText('');
     } catch {
       toast.error('Le message n’a pas été envoyé.');
+    }
+  }
+
+  async function inviteFriend() {
+    if (!room.code) return;
+    const url = new URL('/discussion', window.location.origin);
+    url.searchParams.set('invite', room.code);
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: room.label, text: 'Rejoins mon groupe sur MYbike', url: url.href });
+      } else {
+        await navigator.clipboard.writeText(url.href);
+        toast.success('Lien d’invitation copié.');
+      }
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) toast.error('Partage le code affiché dans la discussion.');
     }
   }
 
@@ -345,6 +364,9 @@ function Conversation({ room, onBack, onPhoto }: { room: Room; onBack: () => voi
         <Button variant="ghost" size="icon" onClick={onBack} aria-label="Toutes les discussions"><ArrowLeft /></Button>
         <RoomAvatar room={room} />
         <h2 className="min-w-0 flex-1 truncate text-lg font-semibold">{room.label}</h2>
+        {user && room.code && <Button variant="outline" size="sm" onClick={() => void inviteFriend()} aria-label="Inviter un ami">
+          <UserPlus /><span className="hidden sm:inline">Inviter un ami</span>
+        </Button>}
         {room.code && <Button variant="ghost" size="icon" onClick={onPhoto} aria-label="Modifier la photo du groupe"><Camera /></Button>}
         {room.code && <div className="flex items-center gap-2 text-sm">
           <span>Code <code className="select-all">{room.code}</code></span>

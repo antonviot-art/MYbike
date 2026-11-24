@@ -311,7 +311,7 @@ function StoryViewer({ item, close, download }: { item: MediaItem; close: () => 
     return () => { active = false; };
   }, [item.music]);
   const gps = item.gps;
-  return <DialogContent hideCloseButton className="story-viewer">
+  return <DialogContent fullscreen hideCloseButton className="story-viewer">
     <DialogTitle className="sr-only">Story de {item.authorName}</DialogTitle>
     <DialogDescription className="sr-only">{item.title}</DialogDescription>
     {item.video ? <video src={item.url} autoPlay muted playsInline controls /> : <img src={item.url} alt={item.title} />}
