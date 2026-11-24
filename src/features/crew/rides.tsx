@@ -16,6 +16,37 @@ const ignoreMapClick = () => {};
 const noPoints: TrackPoint[] = [];
 type Position = { point: TrackPoint; accuracy: number };
 type DashboardLayout = 'map' | 'balanced' | 'speed';
+const difficultyLevels = ['Facile', 'Modéré', 'Difficile', 'Très difficile', 'Expert'] as const;
+
+function readDifficulty(value: unknown) {
+  return difficultyLevels.find((_, index) => String(index + 1) === String(value));
+}
+
+function rideDifficulty(ride: CrewRecord, records: CrewRecord[]) {
+  for (let index = records.length - 1; index >= 0; index--) {
+    const item = records[index];
+    if (item?.kind === 'ride-difficulty' && item.author_id === ride.author_id && item.payload['rideId'] === ride.id) {
+      return item.payload['level'];
+    }
+  }
+  return ride.payload['difficulty'];
+}
+
+export function DifficultyBadge({ ride }: { ride: CrewRecord }) {
+  const { records } = useCrew();
+  const value = rideDifficulty(ride, records);
+  const label = readDifficulty(value);
+  return <span className="inline-flex rounded-full bg-secondary px-2.5 py-1 text-xs font-medium">
+    {label ? String(value) + '/5 · ' + label : 'Difficulté non renseignée'}
+  </span>;
+}
+
+function DifficultyOptions({ placeholder }: { placeholder: string }) {
+  return <><option value="">{placeholder}</option>
+    {difficultyLevels.map((label, index) => <option key={label} value={index + 1}>{index + 1}/5 · {label}</option>)}
+  </>;
+}
+
 const terrains = ['Route', 'Cross', 'Enduro'] as const;
 const dashboardLayoutKey = 'mybike:dashboard-layout';
 
@@ -68,7 +99,7 @@ export function RideFavorite({ rideId }: { rideId: string }) {
 }
 
 function TrackCard({ record, authors }: { record: CrewRecord; authors: boolean }) {
-  const { user, update, refresh, remove } = useCrew();
+  const { user, update, refresh, remove, records, add } = useCrew();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<'edit' | 'delete'>();
   const [busy, setBusy] = useState(false);
@@ -77,6 +108,7 @@ function TrackCard({ record, authors }: { record: CrewRecord; authors: boolean }
   const { payload, author_id: author } = record;
   const title = String(payload['name'] ?? 'Parcours');
   const description = String(payload['description'] ?? '');
+  const difficulty = rideDifficulty(record, records);
   const editable = !user || user.id === author;
   const anchor = 'parcours-' + record.id;
 
@@ -93,13 +125,20 @@ function TrackCard({ record, authors }: { record: CrewRecord; authors: boolean }
     const form = new FormData(event.currentTarget);
     const name = String(form.get('name') ?? '').trim();
     const next = String(form.get('description') ?? '').trim();
+    const submittedDifficulty = form.get('difficulty');
+    const level = readDifficulty(submittedDifficulty) ? Number(submittedDifficulty) : null;
     if (!name) return;
     setBusy(true);
     try {
       if (user) {
-        await socialCall('mybike_ride_edit', { ride_id: record.id, ride_name: name, ride_description: next });
-        await refresh();
-      } else await update(record.id, { ...payload, name, description: next });
+        if (name !== title || next !== description) {
+          await socialCall('mybike_ride_edit', { ride_id: record.id, ride_name: name, ride_description: next });
+          await refresh();
+        }
+        if (level !== (readDifficulty(difficulty) ? Number(difficulty) : null)) {
+          await add('ride-difficulty', { rideId: record.id, level });
+        }
+      } else await update(record.id, { ...payload, name, description: next, difficulty: level });
       setMode(undefined);
       toast.success('Parcours modifié.');
     } catch (error) {
@@ -134,6 +173,7 @@ function TrackCard({ record, authors }: { record: CrewRecord; authors: boolean }
     <p className="mt-2 text-sm text-muted-foreground">{kilometers(Number(payload['distance']) || 0)} · {Math.round((Number(payload['duration']) || 0) / 60000)} min
       {authors && author && <> · <Link className="underline" to="/pilotes/$pilotId" params={{ pilotId: author }}>{String(payload['pilot'] ?? 'Pilote')}</Link></>}
     </p>
+    <div className="mt-2"><DifficultyBadge ride={record} /></div>
     {description && <p className="mt-2 whitespace-pre-wrap break-words">{description}</p>}
     <div className="mt-3 flex flex-wrap gap-2">
       <Button asChild size="sm"><Link to="/parcours/$rideId" params={{ rideId: record.id }}><Route /> Refaire ce parcours</Link></Button>
@@ -145,6 +185,7 @@ function TrackCard({ record, authors }: { record: CrewRecord; authors: boolean }
     {mode === 'edit' && <form className="mt-3 grid gap-2" onSubmit={edit}>
       <label className="grid gap-1">Titre<input name="name" maxLength={80} required defaultValue={title} /></label>
       <label className="grid gap-1">Description<textarea name="description" maxLength={600} defaultValue={description} /></label>
+      <label className="grid gap-1">Difficulté<select name="difficulty" defaultValue={readDifficulty(difficulty) ? String(difficulty) : ''}><DifficultyOptions placeholder="Non renseignée" /></select></label>
       <Button className="justify-self-start" disabled={busy}>Enregistrer</Button>
     </form>}
     {mode === 'delete' && <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -170,12 +211,14 @@ function RideRecorder() {
   const [addingStop, setAddingStop] = useState(false);
   const [tab, setTab] = useState<'mine' | 'explore' | 'saved'>('mine');
   const [terrain, setTerrain] = useState('');
+  const [difficultyFilter, setDifficultyFilter] = useState('');
   const [place, setPlace] = useState('');
   const canSave = draft.segments.some(segment => segment.length > 1);
   const rides = records.filter(record => record.kind === 'ride-track').slice().reverse();
   const myRides = rides.filter(ride => user ? ride.author_id === user.id : /^[0-9a-f-]{36}$/i.test(ride.id));
   const query = place.trim().toLocaleLowerCase('fr');
   const matching = rides.filter(ride => (!terrain || ride.payload['terrain'] === terrain)
+    && (!difficultyFilter || String(rideDifficulty(ride, records)) === difficultyFilter)
     && (!query || [ride.payload['place'], ride.payload['name'], ride.payload['description']].some(value =>
       String(value ?? '').toLocaleLowerCase('fr').includes(query))));
   const pilots = user && draft.recording ? livePilots(records, positionClock, user.id) : [];
@@ -214,6 +257,7 @@ function RideRecorder() {
     setSaving(true);
     try {
       await add('ride-track', { name: title, description, pilot: name, place: String(form.get('place') ?? '').trim(),
+        difficulty: readDifficulty(form.get('difficulty')) ? Number(form.get('difficulty')) : null,
         terrain: terrains.find(item => item === form.get('terrain')), communityTrail: form.has('communityTrail'), segments: draft.segments, distance: draft.distance, duration: draft.duration, motion: draft.motion, maxSpeed: draft.maxSpeed, stops: draft.stops });
       draft.clear();
       target.reset();
@@ -301,6 +345,7 @@ function RideRecorder() {
         <textarea name="description" aria-label="Description du parcours" placeholder="Description (facultative)" maxLength={600} />
         <label className="grid gap-1">Lieu<input name="place" placeholder="Commune, département ou région" maxLength={100} /></label>
         <label className="grid gap-1">Terrain<select name="terrain"><option value="">Choisir un terrain</option>{terrains.map(item => <option key={item}>{item}</option>)}</select></label>
+        <label className="grid gap-1">Difficulté estimée<select name="difficulty"><DifficultyOptions placeholder="Non renseignée" /></select></label>
         <label className="flex items-start gap-2 text-sm"><input type="checkbox" name="communityTrail" /> Afficher cette trace en bleu sur la carte communautaire si elle correspond à un chemin praticable absent du fond de carte.</label>
         <Button disabled={saving} className="justify-self-start"><Share2 />{saving ? 'Partage…' : user ? 'Partager le parcours' : 'Partager dans la démo'}</Button>
       </form>}
@@ -320,6 +365,7 @@ function RideRecorder() {
         <select aria-label="Filtrer par terrain" value={terrain} onChange={event => setTerrain(event.target.value)}>
           <option value="">Tous les terrains</option>{terrains.map(item => <option key={item}>{item}</option>)}
         </select>
+        <select aria-label="Filtrer par difficulté" value={difficultyFilter} onChange={event => setDifficultyFilter(event.target.value)}><DifficultyOptions placeholder="Toutes les difficultés" /></select>
       </div>
       <TrackList records={matching} authors />
     </section>}
