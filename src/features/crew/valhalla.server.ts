@@ -67,6 +67,7 @@ export async function routingResponse(request: Request) {
   const entry = cache.get(key);
   if (entry && entry.expires > Date.now()) return reply(entry.route);
   if (running || Date.now() - lastRequest < 1200) return reply({ error: 'busy' }, 429);
+  const passageTolerance = preference === 'trails' ? 30 : 75;
   lastRequest = Date.now();
   running = true;
 
@@ -77,7 +78,7 @@ export async function routingResponse(request: Request) {
       signal: AbortSignal.timeout(12000),
       body: JSON.stringify({
         locations: locations.map(([lat, lon], index) => ({ lat, lon, type: 'break',
-          ...(index > 0 && index < locations.length - 1 ? { radius: 30, search_cutoff: 75 } : {}),
+          ...(index > 0 && index < locations.length - 1 ? { radius: Math.min(30, passageTolerance), search_cutoff: passageTolerance } : {}),
         })),
         costing: 'motorcycle', costing_options: { motorcycle: profiles[preference] },
         units: 'km', language: 'fr-FR',
@@ -98,7 +99,7 @@ export async function routingResponse(request: Request) {
     const shapes = legs.map(leg => decodeShape(leg.shape));
     if (via.length && (shapes.length !== locations.length - 1 || locations.slice(1, -1).some((location, index) => {
       const arrival = shapes[index]?.at(-1);
-      return !arrival || metersBetween(location, arrival) > 75;
+      return !arrival || metersBetween(location, arrival) > passageTolerance;
     }))) return reply({ error: 'unreachable-via' }, 404);
     const route: SuggestedRide = {
       points: shapes.flatMap((shape, index) => index ? shape.slice(1) : shape),

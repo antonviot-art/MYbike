@@ -333,6 +333,7 @@ input:focus, textarea:focus { outline: 1px solid var(--primary); }
 .rasso-map .map-canvas { height: min(340px, 52vh); border-radius: 14px; }
 
 .map-categories { position: absolute; z-index: 2; top: 12px; left: 54px; max-width: calc(100% - 112px); }
+.map-route-actions { top: 52px; align-items: center; }
 .map-categories select { max-width: 100%; padding: 7px 10px; box-shadow: 0 2px 8px var(--overlay); }
 .media-feed { display: grid; gap: 18px; max-width: 640px; margin-inline: auto; }
 .media-feed article { padding: 14px; border: 1px solid var(--border); border-radius: 20px; background: var(--secondary); }

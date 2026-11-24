@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 import { ClientOnly } from '@tanstack/react-router';
-import { ArrowRight, Layers, Navigation, Upload, MapPin, Route, LocateFixed, Signpost, Share2 } from 'lucide-react';
+import { ArrowRight, Layers, Navigation, Upload, MapPin, Route, LocateFixed, Signpost, Share2, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { CrewShell } from './shell';
@@ -203,10 +203,11 @@ export function MapPage() {
                 if (mode === 'route-start') setRouteStart([lat, lng]);
                 else if (mode === 'route-end') setRouteEnd([lat, lng]);
                 else setVia(current => current.length < maxVia ? [...current, [lat, lng]] : current);
-                setMode(undefined);
+                const keepAdding = mode === 'route-via' && via.length + 1 < maxVia;
+                if (!keepAdding) setMode(undefined);
                 setSuggested(undefined);
                 setRouteError('');
-                setRouteOpen(true);
+                if (mode !== 'route-via') setRouteOpen(true);
               }
             }} />
           </Suspense>
@@ -234,6 +235,13 @@ export function MapPage() {
           }}><Navigation /></Button>}
           <Button size="icon" variant="secondary" title="Voir les positions" aria-label="Voir les positions" disabled={!markers.some(marker => marker.live)} onClick={() => setFocus(value => value + 1)}><LocateFixed /></Button>
           <Button size="icon" variant={aerial ? 'default' : 'secondary'} title={aerial ? 'Vue plan' : 'Vue satellite'} aria-label={aerial ? 'Afficher le plan' : 'Afficher la vue satellite'} aria-pressed={aerial} onClick={() => setAerial(!aerial)}><Layers /></Button>
+          {!locating && <>
+            <Button size="icon" variant={mode === 'route-via' ? 'default' : 'secondary'} aria-pressed={mode === 'route-via'}
+              title="Ajouter des points de passage" aria-label="Ajouter des points de passage" disabled={routeBusy || via.length >= maxVia}
+              onClick={() => setMode(mode === 'route-via' ? undefined : 'route-via')}><MapPin /></Button>
+            {via.length > 0 && <Button size="icon" variant="secondary" title="Retirer le dernier point" aria-label="Retirer le dernier point"
+              disabled={routeBusy} onClick={() => { setVia(current => current.slice(0, -1)); setSuggested(undefined); setRouteError(''); }}><Undo2 /></Button>}
+          </>}
           {locating && <>
           <Button size="icon" variant="secondary" title="Importer GPX" asChild><label className="cursor-pointer">
             <Upload /><span className="sr-only">Importer GPX</span>
@@ -251,9 +259,15 @@ export function MapPage() {
             .then(() => toast.success('Parcours partagé.')).catch(() => toast.error('Le parcours n’a pas été partagé.'))}><Share2 /></Button>}
           </>}
         </div>
+        {!locating && (routeEnd || via.length > 0 || mode === 'route-via') && <div className="map-categories map-route-actions">
+          <span className="map-place-status">{via.length}/{maxVia} points</span>
+          <Button size="sm" disabled={routeBusy || !routeEnd || !(routeStart || devicePosition)} onClick={() => { setMode(undefined); void calculateRoute(); }}>{routeBusy ? 'Calcul…' : 'Calculer'}</Button>
+          {suggested && <span className="map-place-status">{suggested.km.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km · {Math.max(1, Math.round(suggested.seconds / 60))} min</span>}
+        </div>}
+        {!locating && routeError && !routeOpen && <p className="map-status" role="alert">{routeError}</p>}
         {(mode || locating && (sharing || sharedRoutes.length > 0 && category !== 'location')) && <div className="map-status">
           {locating && sharing && <p>Position partagée avec les membres connectés.</p>}
-          {mode && <p>{mode === 'draw' ? 'Touche la carte pour tracer ton parcours.' : mode === 'route-start' ? 'Touche la carte pour choisir le départ.' : mode === 'route-end' ? 'Touche la carte pour choisir la destination.' : mode === 'route-via' ? 'Touche le chemin pour ajouter un point de passage.' : 'Touche la carte pour placer le repère.'}</p>}
+          {mode && <p>{mode === 'draw' ? 'Touche la carte pour tracer ton parcours.' : mode === 'route-start' ? 'Touche la carte pour choisir le départ.' : mode === 'route-end' ? 'Touche la carte pour choisir la destination.' : mode === 'route-via' ? 'Touche les chemins pour poser tes points. Appuie à nouveau sur la punaise pour terminer.' : 'Touche la carte pour placer le repère.'}</p>}
           {locating && category !== 'location' && sharedRoutes.length > 0 && <select aria-label="Parcours partagés" value="" onChange={event => {
             const record = sharedRoutes.find(item => item.id === event.target.value);
             if (record) setPoints(record.payload['points'] as Point[]);
@@ -274,9 +288,6 @@ export function MapPage() {
             {routeStart && devicePosition && <Button variant="ghost" size="sm" disabled={routeBusy} onClick={() => { setRouteStart(undefined); setSuggested(undefined); }}>Partir de ma position</Button>}
             <Button variant="outline" disabled={routeBusy} onClick={() => { setMode('route-end'); setRouteOpen(false); }}>
               {routeEnd ? 'Modifier la destination' : 'Choisir la destination sur la carte'}
-            </Button>
-            <Button variant="outline" disabled={routeBusy || via.length >= maxVia} onClick={() => { setMode('route-via'); setRouteOpen(false); }}>
-              <MapPin /> Ajouter un point de passage
             </Button>
             {via.length > 0 && <ol className="grid gap-1" aria-label="Points de passage">
               {via.map(([lat, lng], index) => <li key={index} className="flex items-center justify-between gap-2">
@@ -302,7 +313,7 @@ export function MapPage() {
               <Button variant="outline" onClick={() => setRouteOpen(false)}>Voir sur la carte</Button>
               <ol className="grid list-decimal gap-1 pl-5">{suggested.directions.map((step, index) => <li key={index}>{step}</li>)}</ol>
             </>}
-            <p className="text-xs text-muted-foreground">En mode Chemins privilégiés, Valhalla peut choisir la route. Pose un point au milieu d’un chemin ouvert aux motos pour faire passer le trajet à cet endroit.</p>
+            <p className="text-xs text-muted-foreground">En mode Chemins privilégiés, Valhalla peut choisir la route. La punaise au bord de la carte permet de placer tes passages sur les chemins ouverts aux motos.</p>
             <p className="text-xs text-muted-foreground">Calcul Valhalla · FOSSGIS · <a className="underline" href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a></p>
           </div>
         </DialogContent>
