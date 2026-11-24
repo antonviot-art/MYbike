@@ -168,27 +168,43 @@ export function MapPage() {
     finally { setSavingRoute(false); }
   }
 
+  const gpsStart: Point | undefined = devicePosition ? [devicePosition.lat, devicePosition.lng] : undefined;
+  const preferredStart = routeStart ?? gpsStart;
+  const calculationPoints = [
+    ...(preferredStart ? [preferredStart] : []),
+    ...via,
+    ...(routeEnd ? [routeEnd] : []),
+  ];
+
   async function calculateRoute() {
-    const start: Point | undefined = routeStart ?? (devicePosition ? [devicePosition.lat, devicePosition.lng] : undefined);
-    if (!start || !routeEnd || routeBusy) return;
+    if (routeBusy) return;
+    const [start, ...stops] = calculationPoints;
+    if (!start || !stops.length) {
+      setRouteError('Pose une destination et choisis un départ, ou utilise ta position GPS.');
+      return;
+    }
     setRouteBusy(true);
     setRouteError('');
     try {
-      const stops = [...via, routeEnd];
       const chunkSize = maxValhallaStops - 1;
       const combined: SuggestedRide = { points: [], km: 0, seconds: 0, directions: [] };
       let departure = start;
       for (let index = 0; index < stops.length; index += chunkSize) {
         const chunk = stops.slice(index, index + chunkSize);
-        const response = await fetch('/api/moto-route', {
+        const request = {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ start: departure, end: chunk.at(-1), preference, via: chunk.slice(0, -1), strictEnd: index + chunkSize < stops.length }),
-        });
+        };
+        let response = await fetch('/api/moto-route', request);
+        if (response.status === 429) {
+          await new Promise(resolve => window.setTimeout(resolve, 1600));
+          response = await fetch('/api/moto-route', request);
+        }
         if (!response.ok) {
           const { error } = await response.json() as { error?: string };
           setRouteError(error === 'disabled' ? 'Le calcul Valhalla est en attente d’activation.' : error === 'no-route'
             ? 'Aucun itinéraire moto trouvé sur une partie du trajet.' : error === 'unreachable-via'
-              ? 'Impossible de relier tous les points à moto. Déplace le repère vers une voie accessible, ou retire-le.' : error === 'busy'
+              ? 'Valhalla ne trouve pas de liaison moto près des points ' + (index + 1) + ' à ' + (index + chunk.length) + '. Déplace ou retire un repère de cette partie.' : error === 'busy'
                 ? 'Le service gratuit est occupé. Réessaie dans un instant.' : 'Le calcul est indisponible pour le moment.');
           return;
         }
@@ -302,8 +318,8 @@ export function MapPage() {
           </>}
         </div>
         {!locating && (routeEnd || via.length > 0 || mode === 'route-via') && <div className="map-categories map-route-actions">
-          <span className="map-place-status">{via.length} points</span>
-          <Button size="sm" disabled={routeBusy || !routeEnd || !(routeStart || devicePosition)} onClick={() => { setMode(undefined); void calculateRoute(); }}>{routeBusy ? 'Calcul…' : 'Calculer'}</Button>
+          <span className="map-place-status">{via.length} points{!preferredStart && via.length > 0 ? ' · le premier sert de départ' : ''}{!routeEnd && via.length > 0 ? ' · le dernier sert d’arrivée' : ''}</span>
+          <Button size="sm" disabled={routeBusy} onClick={() => { setMode(undefined); void calculateRoute(); }}>{routeBusy ? 'Calcul…' : 'Calculer'}</Button>
           {suggested && <span className="map-place-status">{suggested.km.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km · {Math.max(1, Math.round(suggested.seconds / 60))} min</span>}
         </div>}
         {!locating && routeError && !routeOpen && <p className="map-status" role="alert">{routeError}</p>}
@@ -348,7 +364,7 @@ export function MapPage() {
                 <option value="trails">Chemins privilégiés</option>
               </select>
             </label>
-            <Button disabled={routeBusy || !routeEnd || !(routeStart || devicePosition)} onClick={() => void calculateRoute()}>{routeBusy ? 'Calcul…' : 'Calculer'}</Button>
+            <Button disabled={routeBusy} onClick={() => void calculateRoute()}>{routeBusy ? 'Calcul…' : 'Calculer'}</Button>
             {routeError && <p role="alert">{routeError}</p>}
             {suggested && <>
               <p className="font-semibold">{suggested.km.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km · {Math.max(1, Math.round(suggested.seconds / 60))} min</p>
