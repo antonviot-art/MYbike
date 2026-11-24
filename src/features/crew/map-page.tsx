@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { CrewShell } from './shell';
 import { useCrew } from './context';
 import { readGpx } from './data';
-import { maxRouteWaypoints, readSegments } from './tracks';
+import { maxValhallaStops, readSegments } from './tracks';
 import { livePilots } from './live-location';
 import type { RoutePreference, SuggestedRide } from './valhalla.server';
 import { toast } from 'sonner';
@@ -44,7 +44,6 @@ export function MapPage() {
   const [routeStart, setRouteStart] = useState<Point>();
   const [routeEnd, setRouteEnd] = useState<Point>();
   const [via, setVia] = useState<Point[]>([]);
-  const maxVia = maxRouteWaypoints;
   const [savedOpen, setSavedOpen] = useState(false);
   const [savingRoute, setSavingRoute] = useState(false);
   const [preference, setPreference] = useState<RoutePreference>('mixed');
@@ -176,24 +175,42 @@ export function MapPage() {
   }
 
   async function calculateRoute() {
-    const start = routeStart ?? (devicePosition ? [devicePosition.lat, devicePosition.lng] : undefined);
+    const start: Point | undefined = routeStart ?? (devicePosition ? [devicePosition.lat, devicePosition.lng] : undefined);
     if (!start || !routeEnd || routeBusy) return;
     setRouteBusy(true);
     setRouteError('');
     try {
-      const response = await fetch('/api/moto-route', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ start, end: routeEnd, preference, via }),
-      });
-      if (!response.ok) {
-        const { error } = await response.json() as { error?: string };
-        setRouteError(error === 'disabled' ? 'Le calcul Valhalla est en attente d’activation.' : error === 'no-route'
-          ? 'Aucun itinéraire moto trouvé entre ces deux points.' : error === 'unreachable-via' ? 'Impossible de relier tous les points à moto. Déplace le repère vers une voie accessible, ou retire-le.' : error === 'busy'
-            ? 'Le service gratuit est occupé. Réessaie dans un instant.' : 'Le calcul est indisponible pour le moment.');
-        return;
+      const stops = [...via, routeEnd];
+      const chunkSize = maxValhallaStops - 1;
+      const combined: SuggestedRide = { points: [], km: 0, seconds: 0, directions: [] };
+      let departure = start;
+      for (let index = 0; index < stops.length; index += chunkSize) {
+        const chunk = stops.slice(index, index + chunkSize);
+        const response = await fetch('/api/moto-route', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ start: departure, end: chunk.at(-1), preference, via: chunk.slice(0, -1), strictEnd: index + chunkSize < stops.length }),
+        });
+        if (!response.ok) {
+          const { error } = await response.json() as { error?: string };
+          setRouteError(error === 'disabled' ? 'Le calcul Valhalla est en attente d’activation.' : error === 'no-route'
+            ? 'Aucun itinéraire moto trouvé sur une partie du trajet.' : error === 'unreachable-via'
+              ? 'Impossible de relier tous les points à moto. Déplace le repère vers une voie accessible, ou retire-le.' : error === 'busy'
+                ? 'Le service gratuit est occupé. Réessaie dans un instant.' : 'Le calcul est indisponible pour le moment.');
+          return;
+        }
+        const part = await response.json() as SuggestedRide;
+        const last = part.points.at(-1);
+        if (!last) throw new Error('Route vide');
+        const first = part.points[0];
+        const duplicate = index > 0 && first?.[0] === departure[0] && first?.[1] === departure[1];
+        combined.points.push(...(duplicate ? part.points.slice(1) : part.points));
+        combined.km += part.km;
+        combined.seconds += part.seconds;
+        combined.directions.push(...part.directions);
+        departure = last;
+        if (index + chunkSize < stops.length) await new Promise(resolve => window.setTimeout(resolve, 1250));
       }
-      const route = await response.json() as SuggestedRide;
-      setSuggested(route);
+      setSuggested(combined);
     } catch { setRouteError('Le calcul est indisponible pour le moment.'); }
     finally { setRouteBusy(false); }
   }
@@ -232,8 +249,8 @@ export function MapPage() {
               if (mode === 'route-start' || mode === 'route-end' || mode === 'route-via') {
                 if (mode === 'route-start') setRouteStart([lat, lng]);
                 else if (mode === 'route-end') setRouteEnd([lat, lng]);
-                else setVia(current => current.length < maxVia ? [...current, [lat, lng]] : current);
-                const keepAdding = mode === 'route-via' && via.length + 1 < maxVia;
+                else setVia(current => [...current, [lat, lng]]);
+                const keepAdding = mode === 'route-via';
                 if (!keepAdding) setMode(undefined);
                 setSuggested(undefined);
                 setRouteError('');
@@ -267,7 +284,7 @@ export function MapPage() {
           <Button size="icon" variant={aerial ? 'default' : 'secondary'} title={aerial ? 'Vue plan' : 'Vue satellite'} aria-label={aerial ? 'Afficher le plan' : 'Afficher la vue satellite'} aria-pressed={aerial} onClick={() => setAerial(!aerial)}><Layers /></Button>
           {!locating && <>
             <Button size="icon" variant={mode === 'route-via' ? 'default' : 'secondary'} aria-pressed={mode === 'route-via'}
-              title="Ajouter des points de passage" aria-label="Ajouter des points de passage" disabled={routeBusy || via.length >= maxVia}
+              title="Ajouter des points de passage" aria-label="Ajouter des points de passage" disabled={routeBusy}
               onClick={() => setMode(mode === 'route-via' ? undefined : 'route-via')}><MapPin /></Button>
             <Button size="icon" variant="secondary" title="Itinéraires enregistrés" aria-label="Itinéraires enregistrés" onClick={() => { setMode(undefined); setSavedOpen(true); }}><Route /></Button>
             {via.length > 0 && <Button size="icon" variant="secondary" title="Retirer le dernier point" aria-label="Retirer le dernier point"
@@ -291,7 +308,7 @@ export function MapPage() {
           </>}
         </div>
         {!locating && (routeEnd || via.length > 0 || mode === 'route-via') && <div className="map-categories map-route-actions">
-          <span className="map-place-status">{via.length}/{maxVia} points</span>
+          <span className="map-place-status">{via.length} points</span>
           <Button size="sm" disabled={routeBusy || !routeEnd || !(routeStart || devicePosition)} onClick={() => { setMode(undefined); void calculateRoute(); }}>{routeBusy ? 'Calcul…' : 'Calculer'}</Button>
           {suggested && <span className="map-place-status">{suggested.km.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km · {Math.max(1, Math.round(suggested.seconds / 60))} min</span>}
         </div>}

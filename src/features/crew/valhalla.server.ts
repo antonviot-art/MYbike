@@ -1,4 +1,4 @@
-import { maxRouteWaypoints, metersBetween, readSegments, type TrackPoint } from './tracks';
+import { maxValhallaStops, metersBetween, readSegments, type TrackPoint } from './tracks';
 
 const profiles = {
   road: { use_trails: 0, use_tracks: 0, use_highways: 0.5 },
@@ -49,7 +49,7 @@ export async function routingResponse(request: Request) {
   if (origin !== 'https://mybikee.onrender.com' && origin !== new URL(request.url).origin) return reply({ error: 'origin' }, 403);
   if (!request.headers.get('content-type')?.startsWith('application/json')) return reply({ error: 'input' }, 400);
 
-  let input: { start?: unknown; end?: unknown; preference?: unknown; via?: unknown };
+  let input: { start?: unknown; end?: unknown; preference?: unknown; via?: unknown; strictEnd?: unknown };
   try {
     const body = await request.text();
     if (body.length > 4096) return reply({ error: 'input' }, 400);
@@ -57,11 +57,11 @@ export async function routingResponse(request: Request) {
     if (!input || typeof input !== 'object') return reply({ error: 'input' }, 400);
   } catch { return reply({ error: 'input' }, 400); }
   const via = input.via ?? [];
-  if (!Array.isArray(via) || via.length > maxRouteWaypoints) return reply({ error: 'input' }, 400);
+  if (!Array.isArray(via) || via.length > maxValhallaStops - 2) return reply({ error: 'input' }, 400);
   const [locations] = readSegments([[input.start, ...via, input.end]]);
   const preference = input.preference as RoutePreference;
   if (!locations || !Object.hasOwn(profiles, preference)) return reply({ error: 'input' }, 400);
-  const key = JSON.stringify([preference, locations.map(point => point.map(value => Number(value.toFixed(5))))]);
+  const key = JSON.stringify([preference, input.strictEnd === true, locations.map(point => point.map(value => Number(value.toFixed(5))))]);
   const entry = cache.get(key);
   if (entry && entry.expires > Date.now()) return reply(entry.route);
   if (running || Date.now() - lastRequest < 1200) return reply({ error: 'busy' }, 429);
@@ -76,7 +76,7 @@ export async function routingResponse(request: Request) {
       signal: AbortSignal.timeout(12000),
       body: JSON.stringify({
         locations: locations.map(([lat, lon], index) => ({ lat, lon, type: 'break',
-          ...(index > 0 && index < locations.length - 1 ? { radius: Math.min(30, passageTolerance), search_cutoff: passageTolerance } : {}),
+          ...(index > 0 && (index < locations.length - 1 || input.strictEnd === true) ? { radius: Math.min(30, passageTolerance), search_cutoff: passageTolerance } : {}),
         })),
         costing: 'motorcycle', costing_options: { motorcycle: profiles[preference] },
         units: 'km', language: 'fr-FR',
@@ -99,6 +99,10 @@ export async function routingResponse(request: Request) {
       const arrival = shapes[index]?.at(-1);
       return !arrival || metersBetween(location, arrival) > passageTolerance;
     }))) return reply({ error: 'unreachable-via' }, 404);
+    if (input.strictEnd === true) {
+      const arrival = shapes.at(-1)?.at(-1);
+      if (!arrival || metersBetween(locations[locations.length - 1]!, arrival) > passageTolerance) return reply({ error: 'unreachable-via' }, 404);
+    }
     const route: SuggestedRide = {
       points: shapes.flatMap((shape, index) => index ? shape.slice(1) : shape),
       km: summary.length, seconds: summary.time,

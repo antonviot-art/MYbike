@@ -1,4 +1,4 @@
-export const maxRouteWaypoints = 48;
+export const maxValhallaStops = 10;
 
 export type TrackPoint = [number, number];
 export type TrackStop = { point: TrackPoint; label: string };
