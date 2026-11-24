@@ -43,9 +43,10 @@ function reply(data: unknown, status = 200) {
 }
 
 export async function routingResponse(request: Request) {
-  if (!import.meta.env.DEV && process.env['VALHALLA_DEMO_ENABLED'] !== 'true') return reply({ error: 'disabled' }, 503);
+  if (process.env['VALHALLA_DEMO_ENABLED'] === 'false') return reply({ error: 'disabled' }, 503);
   if (request.method !== 'POST') return reply({ error: 'method' }, 405);
-  if (request.headers.get('origin') !== new URL(request.url).origin) return reply({ error: 'origin' }, 403);
+  const origin = request.headers.get('origin');
+  if (origin !== 'https://mybikee.onrender.com' && origin !== new URL(request.url).origin) return reply({ error: 'origin' }, 403);
   if (!request.headers.get('content-type')?.startsWith('application/json')) return reply({ error: 'input' }, 400);
 
   let input: { start?: unknown; end?: unknown; preference?: unknown };
