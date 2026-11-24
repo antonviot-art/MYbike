@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 import { ClientOnly } from '@tanstack/react-router';
-import { ArrowRight, Layers, Navigation, Upload, MapPin, Route, LocateFixed, Share2 } from 'lucide-react';
+import { ArrowRight, Layers, Navigation, Upload, MapPin, Route, LocateFixed, Signpost, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { CrewShell } from './shell';
@@ -8,6 +8,7 @@ import { useCrew } from './context';
 import { readGpx } from './data';
 import { readSegments } from './tracks';
 import { livePilots } from './live-location';
+import type { RoutePreference, SuggestedRide } from './valhalla.server';
 import { toast } from 'sonner';
 
 const noPoints: Point[] = [];
@@ -35,8 +36,15 @@ export function MapPage() {
     return () => { active = false; };
   }, []);
   const [points, setPoints] = useState<Point[]>([]);
-  const [mode, setMode] = useState<'draw' | 'mark'>();
+  const [mode, setMode] = useState<'draw' | 'mark' | 'route-start' | 'route-end'>();
   const [pin, setPin] = useState<Point>();
+  const [routeOpen, setRouteOpen] = useState(false);
+  const [routeStart, setRouteStart] = useState<Point>();
+  const [routeEnd, setRouteEnd] = useState<Point>();
+  const [preference, setPreference] = useState<RoutePreference>('mixed');
+  const [suggested, setSuggested] = useState<SuggestedRide>();
+  const [routeBusy, setRouteBusy] = useState(false);
+  const [routeError, setRouteError] = useState('');
   const [saving, setSaving] = useState(false);
   const [category, setCategory] = useState('all');
   const [nearby, setNearby] = useState<NearbyPlace[]>([]);
@@ -128,6 +136,30 @@ export function MapPage() {
     };
   }, [category, lat, lng, radius, showPlaces]);
 
+  async function calculateRoute() {
+    const start = routeStart ?? (devicePosition ? [devicePosition.lat, devicePosition.lng] : undefined);
+    if (!start || !routeEnd || routeBusy) return;
+    setRouteBusy(true);
+    setRouteError('');
+    try {
+      const response = await fetch('/api/moto-route', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ start, end: routeEnd, preference }),
+      });
+      if (!response.ok) {
+        const { error } = await response.json() as { error?: string };
+        setRouteError(error === 'disabled' ? 'Le calcul Valhalla est en attente d’activation.' : error === 'no-route'
+          ? 'Aucun itinéraire moto trouvé entre ces deux points.' : error === 'busy'
+            ? 'Le service gratuit est occupé. Réessaie dans un instant.' : 'Le calcul est indisponible pour le moment.');
+        return;
+      }
+      const route = await response.json() as SuggestedRide;
+      setSuggested(route);
+      if (category === 'location') setCategory('all');
+    } catch { setRouteError('Le calcul est indisponible pour le moment.'); }
+    finally { setRouteBusy(false); }
+  }
+
   async function savePin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!pin || saving) return;
@@ -152,9 +184,17 @@ export function MapPage() {
       <section className="map-screen" aria-label="Carte des sorties">
         <ClientOnly fallback={<div className="map-canvas bg-secondary grid place-items-center">Chargement de la carte…</div>}>
           <Suspense fallback={<div className="map-canvas bg-secondary" />}>
-            <MapView points={category === 'location' && !mode ? noPoints : points} markers={markers} paths={sharedPaths} focus={focus} initialPosition={devicePosition} onCenter={(lat, lng, zoom) => setViewport({ lat, lng, zoom })} onPoint={(lat, lng) => {
-              if (mode === 'draw') setPoints(current => [...current, [lat, lng]]);
+            <MapView points={category === 'location' && !mode ? noPoints : (suggested?.points ?? points)} markers={markers} paths={sharedPaths} focus={focus} initialPosition={devicePosition} onCenter={(lat, lng, zoom) => setViewport({ lat, lng, zoom })} onPoint={(lat, lng) => {
+              if (mode === 'draw') { setSuggested(undefined); setPoints(current => [...current, [lat, lng]]); }
               if (mode === 'mark') { setPin([lat, lng]); setMode(undefined); }
+              if (mode === 'route-start' || mode === 'route-end') {
+                if (mode === 'route-start') setRouteStart([lat, lng]);
+                else setRouteEnd([lat, lng]);
+                setMode(undefined);
+                setSuggested(undefined);
+                setRouteError('');
+                setRouteOpen(true);
+              }
             }} />
           </Suspense>
         </ClientOnly>
@@ -179,13 +219,14 @@ export function MapPage() {
           }}><Navigation /></Button>}
           <Button size="icon" variant="secondary" title="Voir les positions" aria-label="Voir les positions" disabled={!markers.some(marker => marker.live)} onClick={() => setFocus(value => value + 1)}><LocateFixed /></Button>
           <Button size="icon" variant={aerial ? 'default' : 'secondary'} title={aerial ? 'Vue plan' : 'Vue satellite'} aria-label={aerial ? 'Afficher le plan' : 'Afficher la vue satellite'} aria-pressed={aerial} onClick={() => setAerial(!aerial)}><Layers /></Button>
+          <Button size="icon" variant="secondary" title="Itinéraire moto" aria-label="Itinéraire moto" onClick={() => { setMode(undefined); setRouteOpen(true); }}><Signpost /></Button>
           <Button size="icon" variant="secondary" title="Importer GPX" asChild><label className="cursor-pointer">
             <Upload /><span className="sr-only">Importer GPX</span>
             <input className="sr-only" type="file" accept=".gpx" onChange={async event => {
               const file = event.currentTarget.files?.[0];
               event.currentTarget.value = '';
               if (!file) return;
-              try { setPoints(readGpx(await file.text())); setMode(undefined); }
+              try { setPoints(readGpx(await file.text())); setSuggested(undefined); setMode(undefined); }
               catch (error) { toast.error(String(error)); }
             }} />
           </label></Button>
@@ -196,16 +237,47 @@ export function MapPage() {
         </div>
         {(mode || sharing || sharedRoutes.length > 0 && category !== 'location') && <div className="map-status">
           {sharing && <p>Position partagée avec les membres connectés.</p>}
-          {mode && <p>{mode === 'draw' ? 'Touche la carte pour tracer ton parcours.' : 'Touche la carte pour placer le repère.'}</p>}
+          {mode && <p>{mode === 'draw' ? 'Touche la carte pour tracer ton parcours.' : mode === 'route-start' ? 'Touche la carte pour choisir le départ.' : mode === 'route-end' ? 'Touche la carte pour choisir la destination.' : 'Touche la carte pour placer le repère.'}</p>}
           {category !== 'location' && sharedRoutes.length > 0 && <select aria-label="Parcours partagés" value="" onChange={event => {
             const record = sharedRoutes.find(item => item.id === event.target.value);
-            if (record) setPoints(record.payload['points'] as Point[]);
+            if (record) { setPoints(record.payload['points'] as Point[]); setSuggested(undefined); }
           }}>
             <option value="" disabled>Parcours partagés</option>
             {sharedRoutes.map((record, index) => <option key={record.id} value={record.id}>{String(record.payload['name'])} · {index + 1}</option>)}
           </select>}
         </div>}
       </section>
+      <Dialog open={routeOpen} onOpenChange={setRouteOpen}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto">
+          <DialogTitle>Itinéraire moto</DialogTitle>
+          <DialogDescription>Choisis une destination sur la carte. Le calcul envoie les deux points au serveur de démo Valhalla.</DialogDescription>
+          <div className="grid gap-2 text-sm">
+            <Button variant="outline" disabled={routeBusy} onClick={() => { setMode('route-start'); setRouteOpen(false); }}>
+              {routeStart ? 'Modifier le départ' : devicePosition ? 'Départ depuis ta position · modifier' : 'Choisir le départ'}
+            </Button>
+            {routeStart && devicePosition && <Button variant="ghost" size="sm" disabled={routeBusy} onClick={() => { setRouteStart(undefined); setSuggested(undefined); }}>Partir de ma position</Button>}
+            <Button variant="outline" disabled={routeBusy} onClick={() => { setMode('route-end'); setRouteOpen(false); }}>
+              {routeEnd ? 'Modifier la destination' : 'Choisir la destination sur la carte'}
+            </Button>
+            <label className="grid gap-1">Type de trajet
+              <select value={preference} disabled={routeBusy} onChange={event => { setPreference(event.target.value as RoutePreference); setSuggested(undefined); }}>
+                <option value="road">Route privilégiée</option>
+                <option value="mixed">Mixte</option>
+                <option value="trails">Chemins privilégiés</option>
+              </select>
+            </label>
+            <Button disabled={routeBusy || !routeEnd || !(routeStart || devicePosition)} onClick={() => void calculateRoute()}>{routeBusy ? 'Calcul…' : 'Calculer'}</Button>
+            {routeError && <p role="alert">{routeError}</p>}
+            {suggested && <>
+              <p className="font-semibold">{suggested.km.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km · {Math.max(1, Math.round(suggested.seconds / 60))} min</p>
+              <Button variant="outline" onClick={() => setRouteOpen(false)}>Voir sur la carte</Button>
+              <ol className="grid list-decimal gap-1 pl-5">{suggested.directions.map((step, index) => <li key={index}>{step}</li>)}</ol>
+            </>}
+            <p className="text-xs text-muted-foreground">Le profil exprime une préférence. Respecte la signalisation et les accès sur place.</p>
+            <p className="text-xs text-muted-foreground">Calcul Valhalla · FOSSGIS · <a className="underline" href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a></p>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={Boolean(pin)} onOpenChange={open => { if (!open) setPin(undefined); }}>
         <DialogContent>
           <DialogTitle>Ajouter un repère</DialogTitle>

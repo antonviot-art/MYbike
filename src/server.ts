@@ -2,6 +2,7 @@ import "./lib/error-capture";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
+import { routingResponse } from "./features/crew/valhalla.server";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -49,6 +50,7 @@ function isH3SwallowedErrorBody(body: string): boolean {
 // twice and renders garbled.
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
+    if (new URL(request.url).pathname === '/api/moto-route') return routingResponse(request);
     if (request.method === "HEAD" && new URL(request.url).pathname === "/__mybike_ready") {
       return new Response(null, { status: 204, headers: { "X-MYbike-Ready": "1", "Cache-Control": "no-store" } });
     }

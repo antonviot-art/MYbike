@@ -1,0 +1,103 @@
+import { readSegments, type TrackPoint } from './tracks';
+
+const profiles = {
+  road: { use_trails: 0, use_tracks: 0, use_highways: 0.5 },
+  mixed: { use_trails: 0.5, use_tracks: 0.5, use_highways: 0.2 },
+  trails: { use_trails: 1, use_tracks: 1, use_highways: 0 },
+} as const;
+
+export type RoutePreference = keyof typeof profiles;
+export type SuggestedRide = { points: TrackPoint[]; km: number; seconds: number; directions: string[] };
+
+const cache = new Map<string, { expires: number; route: SuggestedRide }>();
+let lastRequest = 0;
+let running = false;
+
+function decodeShape(shape: string): TrackPoint[] {
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+  const points: TrackPoint[] = [];
+  function delta() {
+    let value = 0;
+    let shift = 0;
+    while (index < shape.length && shift < 30) {
+      const byte = shape.charCodeAt(index++) - 63;
+      if (byte < 0 || byte > 63) break;
+      value |= (byte & 31) << shift;
+      if (byte < 32) return (value & 1) ? ~(value >> 1) : value >> 1;
+      shift += 5;
+    }
+    throw new Error('Invalid route shape');
+  }
+  while (index < shape.length) {
+    lat += delta();
+    lng += delta();
+    points.push([lat / 1e6, lng / 1e6]);
+  }
+  return points;
+}
+
+function reply(data: unknown, status = 200) {
+  return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
+}
+
+export async function routingResponse(request: Request) {
+  if (!import.meta.env.DEV && process.env['VALHALLA_DEMO_ENABLED'] !== 'true') return reply({ error: 'disabled' }, 503);
+  if (request.method !== 'POST') return reply({ error: 'method' }, 405);
+  if (request.headers.get('origin') !== new URL(request.url).origin) return reply({ error: 'origin' }, 403);
+  if (!request.headers.get('content-type')?.startsWith('application/json')) return reply({ error: 'input' }, 400);
+
+  let input: { start?: unknown; end?: unknown; preference?: unknown };
+  try {
+    const body = await request.text();
+    if (body.length > 512) return reply({ error: 'input' }, 400);
+    input = JSON.parse(body);
+    if (!input || typeof input !== 'object') return reply({ error: 'input' }, 400);
+  } catch { return reply({ error: 'input' }, 400); }
+  const [locations] = readSegments([[input.start, input.end]]);
+  const preference = input.preference as RoutePreference;
+  if (!locations || !Object.hasOwn(profiles, preference)) return reply({ error: 'input' }, 400);
+  const key = JSON.stringify([preference, locations.map(point => point.map(value => Number(value.toFixed(5))))]);
+  const entry = cache.get(key);
+  if (entry && entry.expires > Date.now()) return reply(entry.route);
+  if (running || Date.now() - lastRequest < 1200) return reply({ error: 'busy' }, 429);
+  lastRequest = Date.now();
+  running = true;
+
+  try {
+    const response = await fetch('https://valhalla1.openstreetmap.de/route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Client-Id': 'mybikee.onrender.com' },
+      signal: AbortSignal.timeout(12000),
+      body: JSON.stringify({
+        locations: locations.map(([lat, lon]) => ({ lat, lon })),
+        costing: 'motorcycle', costing_options: { motorcycle: profiles[preference] },
+        units: 'km', language: 'fr-FR',
+      }),
+    });
+    if (response.status === 429) return reply({ error: 'busy' }, 429);
+    if (response.status === 400 || response.status === 404) return reply({ error: 'no-route' }, 404);
+    if (!response.ok) return reply({ error: 'unavailable' }, 502);
+    const result = await response.json() as { trip?: {
+      summary?: { length: number; time: number };
+      legs?: { shape: string; maneuvers?: { instruction: string }[] }[];
+    }};
+    const summary = result.trip?.summary;
+    const legs = result.trip?.legs;
+    if (!summary || !legs?.length || !Number.isFinite(summary.length) || !Number.isFinite(summary.time)) {
+      return reply({ error: 'no-route' }, 404);
+    }
+    const route: SuggestedRide = {
+      points: legs.flatMap(leg => decodeShape(leg.shape)),
+      km: summary.length, seconds: summary.time,
+      directions: legs.flatMap(leg => (leg.maneuvers ?? []).map(step => step.instruction)),
+    };
+    if (route.points.length < 2) return reply({ error: 'no-route' }, 404);
+    if (cache.size >= 64) cache.delete(cache.keys().next().value!);
+    cache.set(key, { expires: Date.now() + 600000, route });
+    return reply(route);
+  } catch {
+    return reply({ error: 'unavailable' }, 502);
+  } finally { running = false; }
+}
