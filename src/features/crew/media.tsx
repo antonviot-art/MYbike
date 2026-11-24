@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { Download, Heart, Images, MapPin, MessageCircle, MoreHorizontal, Plus, Share2, Upload, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, Heart, Images, MapPin, MessageCircle, MoreHorizontal, Plus, Share2, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Avatar, CrewShell } from './shell';
@@ -150,6 +150,9 @@ function MediaGallery({ initialRide, initialPost }: { initialRide: string | unde
   }, [initialPost, openedLink, extra, now]);
 
   const stories = extra.filter(item => (item.storyUntil ?? 0) > now).slice().reverse();
+  const storyIndex = stories.findIndex(item => item.id === selected?.id);
+  const previousStory = storyIndex > 0 ? stories[storyIndex - 1] : undefined;
+  const nextStory = storyIndex >= 0 ? stories[storyIndex + 1] : undefined;
   const all = [...(user ? [] : demo), ...extra.filter(item => !item.storyUntil)];
   const items = all.filter(item => filter === 'Toutes les sorties' || item.session === filter)
     .sort((a, b) => sort === 'recent' ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date));
@@ -301,7 +304,8 @@ function MediaGallery({ initialRide, initialPost }: { initialRide: string | unde
       </DialogContent>
     </Dialog>
     <Dialog open={Boolean(selected)} onOpenChange={open => { if (!open) setSelected(undefined); }}>
-      {selected?.storyUntil ? <StoryViewer key={selected.id} item={selected} community={communityTracks.find(track => track.id === selected.musicId)} close={() => setSelected(undefined)} download={download} /> : selected && <DialogContent className="max-h-[90dvh] max-w-3xl overflow-y-auto">
+      {selected?.storyUntil ? <StoryViewer key={selected.id} item={selected} community={communityTracks.find(track => track.id === selected.musicId)} close={() => setSelected(undefined)} download={download}
+        previous={previousStory ? () => setSelected(previousStory) : undefined} next={nextStory ? () => setSelected(nextStory) : undefined} /> : selected && <DialogContent className="max-h-[90dvh] max-w-3xl overflow-y-auto">
         <DialogTitle>{selected.title}</DialogTitle>
         <DialogDescription>{selected.session}</DialogDescription>
         {selected.video ? <video src={selected.url} controls className="w-full max-h-[60vh]" /> : <img src={selected.url} alt={selected.title} className="w-full max-h-[60vh] object-contain" />}
@@ -418,9 +422,19 @@ function CommunityMusicUpload() {
   </details>;
 }
 
-function StoryViewer({ item, community, close, download }: { item: MediaItem; community?: CommunityTrack | undefined; close: () => void; download: () => Promise<void> }) {
+function StoryViewer({ item, community, close, download, previous, next }: {
+  item: MediaItem;
+  community?: CommunityTrack | undefined;
+  close: () => void;
+  download: () => Promise<void>;
+  previous?: (() => void) | undefined;
+  next?: (() => void) | undefined;
+}) {
   const [audio, setAudio] = useState('');
   const [menu, setMenu] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const player = useRef<HTMLAudioElement>(null);
+  const touchStart = useRef<{ x: number; y: number } | undefined>(undefined);
   const track = storyTracks.find(entry => entry.id === item.musicId);
   useEffect(() => {
     const path = community?.path ?? item.music;
@@ -430,10 +444,36 @@ function StoryViewer({ item, community, close, download }: { item: MediaItem; co
     return () => { active = false; };
   }, [item.music, track, community?.path]);
   const gps = item.gps;
-  return <DialogContent fullscreen hideCloseButton className="story-viewer">
+  const audioUrl = track ? storyTrackUrl(track) : audio;
+  return <DialogContent fullscreen hideCloseButton className="story-viewer"
+    onKeyDown={event => {
+      if (event.target instanceof HTMLMediaElement) return;
+      const move = event.key === 'ArrowLeft' ? previous : event.key === 'ArrowRight' ? next : undefined;
+      if (move) { event.preventDefault(); move(); }
+    }}
+    onTouchStart={event => {
+      const touch = event.touches.length === 1 ? event.touches[0] : undefined;
+      const target = event.target;
+      const interactive = target instanceof Element && target.closest('button, a, .story-menu');
+      const videoControls = touch && target instanceof HTMLVideoElement && touch.clientY >= target.getBoundingClientRect().bottom - 56;
+      touchStart.current = touch && !interactive && !videoControls ? { x: touch.clientX, y: touch.clientY } : undefined;
+    }}
+    onTouchCancel={() => { touchStart.current = undefined; }}
+    onTouchEnd={event => {
+      const start = touchStart.current;
+      touchStart.current = undefined;
+      const touch = event.changedTouches[0];
+      if (!start || !touch) return;
+      const dx = touch.clientX - start.x;
+      const dy = touch.clientY - start.y;
+      if (Math.abs(dx) >= 45 && Math.abs(dx) > Math.abs(dy) * 1.5) (dx < 0 ? next : previous)?.();
+    }}>
     <DialogTitle className="sr-only">Story de {item.authorName}</DialogTitle>
     <DialogDescription className="sr-only">{item.title}</DialogDescription>
-    {item.video ? <video src={item.url} autoPlay muted playsInline controls /> : <img src={item.url} alt={item.title} />}
+    {item.video ? <video src={item.url} autoPlay muted playsInline controls /> : <img src={item.url} alt={item.title} draggable={false} />}
+    {audioUrl && <audio ref={player} src={audioUrl} autoPlay loop hidden onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} />}
+    {previous && <Button className="story-step story-previous" variant="secondary" size="icon" aria-label="Story précédente" onClick={previous}><ChevronLeft /></Button>}
+    {next && <Button className="story-step story-next" variant="secondary" size="icon" aria-label="Story suivante" onClick={next}><ChevronRight /></Button>}
     <header className="story-header">
       <Avatar userId={item.author} pilot={(item.authorName || 'M').charAt(0).toUpperCase()} />
       <strong className="mr-auto truncate">{item.authorName || 'Pilote'}</strong>
@@ -442,15 +482,20 @@ function StoryViewer({ item, community, close, download }: { item: MediaItem; co
     </header>
     {menu && <div className="story-menu">
       <Button size="sm" variant="secondary" onClick={() => void download()}><Download /> Télécharger</Button>
+      {audioUrl && <Button size="sm" variant="secondary" onClick={() => {
+        const audioPlayer = player.current;
+        if (!audioPlayer) return;
+        if (audioPlayer.paused) void audioPlayer.play().catch(() => toast.error('Lecture indisponible.'));
+        else audioPlayer.pause();
+      }}>{playing ? 'Couper la musique' : 'Écouter la musique'}</Button>}
+      {track?.credit && <StoryMusicCredit track={track} />}
       {item.place && <p>{item.place}</p>}
       {gps && <a className="underline" href={'https://www.openstreetmap.org/?mlat=' + gps[0] + '&mlon=' + gps[1]}>Voir le lieu</a>}
       {item.link && <a className="underline" href={item.link} target="_blank" rel="noopener noreferrer">Ouvrir le lien</a>}
     </div>}
     <div className="story-caption">
       {item.description && <p>{item.description}</p>}
-      {track ? <div className="story-music">{track.credit ? <StoryMusicCredit track={track} /> : <span>♫ {track.title}</span>}<audio src={storyTrackUrl(track)} autoPlay loop controls aria-label={'Musique de la story · ' + track.title} /></div>
-        : audio && <div className="story-music">{community && <span>♫ {community.title}</span>}
-          <audio src={audio} controls autoPlay={Boolean(community)} loop={Boolean(community)} aria-label="Musique de la story" /></div>}
+
     </div>
   </DialogContent>;
 }
