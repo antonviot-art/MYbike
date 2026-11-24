@@ -356,7 +356,8 @@ input:focus, textarea:focus { outline: 1px solid var(--primary); }
 .story-header { top: 0; display: flex; align-items: center; gap: 8px; padding-top: max(16px, env(safe-area-inset-top)); background: linear-gradient(#000b, transparent); }
 .story-caption { bottom: max(35px, env(safe-area-inset-bottom)); width: fit-content; max-width: 100%; display: grid; gap: 8px; pointer-events: none; }
 .story-caption p { width: fit-content; border-radius: 8px; padding: 6px 10px; background: #000a; white-space: pre-wrap; overflow-wrap: anywhere; }
-.story-caption audio { max-width: 100%; pointer-events: auto; }
+.story-caption audio { display: block; max-width: 100%; pointer-events: auto; }
+.story-music { display: grid; gap: 4px; padding: 6px 8px; border-radius: 10px; background: #000a; font-size: .85rem; }
 .story-menu { position: absolute; top: max(64px, calc(env(safe-area-inset-top) + 52px)); right: 16px; display: grid; gap: 8px; padding: 12px; border-radius: 12px; background: #171717; }
 .ride-speed-digit { display: inline-block; overflow: hidden; }
 .ride-speed-digit > span { display: block; }

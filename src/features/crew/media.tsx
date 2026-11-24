@@ -30,7 +30,18 @@ type MediaItem = {
   link?: string | undefined;
   storyUntil?: number;
   music?: string | undefined;
+  musicId?: string | undefined;
 };
+
+const storyTracks = [
+  { id: 'ligne-rouge', title: 'Ligne rouge', style: 'Électro · 132 BPM' },
+  { id: 'route-de-nuit', title: 'Route de nuit', style: 'Synthé · 98 BPM' },
+  { id: 'poussiere', title: 'Poussière', style: 'Breakbeat · 112 BPM' },
+] as const;
+
+function storyTrackUrl(track: (typeof storyTracks)[number]) {
+  return '/story-music/' + track.id + '.wav';
+}
 
 const demo = [
   { key: 'ride', title: 'Tous au départ', date: '2026-11-15', session: 'Les Vosges' },
@@ -91,6 +102,7 @@ function MediaGallery({ initialRide, initialPost }: { initialRide: string | unde
       author: author_id, authorName: String(payload['authorName'] || 'Pilote'),
       link: webLink(payload['link']), storyUntil: Number(payload['storyUntil']) || 0,
       music: typeof payload['music'] === 'string' ? payload['music'] : undefined,
+      musicId: typeof payload['musicId'] === 'string' ? payload['musicId'] : undefined,
     }))).then(results => {
       if (active) setExtra(results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []));
     });
@@ -137,12 +149,7 @@ function MediaGallery({ initialRide, initialPost }: { initialRide: string | unde
       if (files.some(file => file.size > 50 * 1024 * 1024)) throw new Error('Un fichier dépasse 50 Mo.');
       if (user && visibility === 'friends') await socialCall('mybike_friends_list', {});
       const folder = visibility === 'friends' ? 'friends' : undefined;
-      const track = fields.get('music');
-      let music: string | undefined;
-      if (story && track instanceof File && track.size) {
-        if (!track.type.startsWith('audio/') || track.size > 15 * 1024 * 1024) throw new Error('Choisis un fichier audio de 15 Mo maximum.');
-        music = await upload(track, track.name.split('.').at(-1)?.match(/^[a-z\d]{1,8}$/i)?.[0] ?? 'mp3', folder);
-      }
+      const track = story ? storyTracks.find(item => item.id === fields.get('musicId')) : undefined;
       for (const file of files) {
         const video = file.type.startsWith('video/');
         const extension = file.name.split('.').at(-1)?.match(/^[a-z\d]{1,8}$/i)?.[0] ?? (video ? 'mp4' : 'jpg');
@@ -167,7 +174,7 @@ function MediaGallery({ initialRide, initialPost }: { initialRide: string | unde
           session: ride ? String(ride.payload['name'] ?? 'Parcours') : 'Nouvelle sortie',
           video, visibility, description, place, authorName: name, ...(gps ? { gps } : {}),
           ...(ride ? { rideId: ride.id } : {}), ...(link ? { link } : {}),
-          ...(story ? { storyUntil: Date.now() + 86400000, ...(music ? { music } : {}) } : {}),
+          ...(story ? { storyUntil: Date.now() + 86400000, ...(track ? { musicId: track.id } : {}) } : {}),
         });
         setFiles(pending => pending.filter(item => item !== file));
       }
@@ -243,7 +250,7 @@ function MediaGallery({ initialRide, initialPost }: { initialRide: string | unde
           <label className="grid gap-1">Photos ou vidéos<input type="file" className="w-full" accept="image/*,video/*,.heic,.heif" multiple disabled={busy}
             onChange={event => setFiles(Array.from(event.target.files ?? []))} /></label>
           {files.length > 0 && <p className="text-sm text-muted-foreground">{files.length} fichier(s) à publier</p>}
-          {publishing === 'story' && <label className="grid gap-1">Musique (facultative)<input name="music" type="file" accept="audio/*" /></label>}
+          {publishing === 'story' && <StoryMusicPicker />}
           <label className="grid gap-1">Description<textarea name="description" rows={3} maxLength={600} /></label>
           <label className="grid gap-1">Lien (facultatif)<input name="link" type="url" maxLength={500} placeholder="https://…" /></label>
           <label className="grid gap-1">Lieu (facultatif)<input name="place" maxLength={120} placeholder="Ex. Forêt de Clairvaux" /></label>
@@ -301,15 +308,30 @@ function FeedVideo({ url }: { url: string }) {
   return <video ref={ref} src={url} muted playsInline controls preload="metadata" className="media-video" />;
 }
 
+function StoryMusicPicker() {
+  const [id, setId] = useState('');
+  const track = storyTracks.find(item => item.id === id);
+  return <div className="grid gap-2">
+    <label className="grid gap-1">Ajouter une musique
+      <select name="musicId" value={id} onChange={event => setId(event.currentTarget.value)}>
+        <option value="">Sans musique</option>
+        {storyTracks.map(item => <option key={item.id} value={item.id}>{item.title} · {item.style}</option>)}
+      </select>
+    </label>
+    {track && <audio key={track.id} src={storyTrackUrl(track)} className="w-full" controls preload="none" aria-label={'Aperçu de ' + track.title} />}
+  </div>;
+}
+
 function StoryViewer({ item, close, download }: { item: MediaItem; close: () => void; download: () => Promise<void> }) {
   const [audio, setAudio] = useState('');
   const [menu, setMenu] = useState(false);
+  const track = storyTracks.find(entry => entry.id === item.musicId);
   useEffect(() => {
-    if (!item.music) return;
+    if (!item.music || track) return;
     let active = true;
     void resolveMedia(item.music).then(url => { if (active) setAudio(url); }).catch(() => {});
     return () => { active = false; };
-  }, [item.music]);
+  }, [item.music, track]);
   const gps = item.gps;
   return <DialogContent fullscreen hideCloseButton className="story-viewer">
     <DialogTitle className="sr-only">Story de {item.authorName}</DialogTitle>
@@ -329,7 +351,8 @@ function StoryViewer({ item, close, download }: { item: MediaItem; close: () => 
     </div>}
     <div className="story-caption">
       {item.description && <p>{item.description}</p>}
-      {audio && <audio src={audio} controls preload="none" aria-label="Musique de la story" />}
+      {track ? <div className="story-music"><span>♫ {track.title}</span><audio src={storyTrackUrl(track)} autoPlay loop controls aria-label={'Musique de la story · ' + track.title} /></div>
+        : audio && <audio src={audio} controls preload="none" aria-label="Musique de la story" />}
     </div>
   </DialogContent>;
 }
