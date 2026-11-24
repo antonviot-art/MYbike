@@ -8,6 +8,7 @@ import { useCrew } from './context';
 import { readGpx } from './data';
 import { maxValhallaStops, readSegments } from './tracks';
 import { livePilots } from './live-location';
+import { useInitialPosition } from './use-initial-position';
 import type { RoutePreference, SuggestedRide } from './valhalla.server';
 import { toast } from 'sonner';
 
@@ -29,14 +30,7 @@ export function MapPage() {
   const [view, setView] = useState<'locate' | 'route'>('locate');
   const locating = view === 'locate';
   const [focus, setFocus] = useState(0);
-  const [devicePosition, setDevicePosition] = useState<{ lat: number; lng: number; accuracy: number }>();
-  useEffect(() => {
-    let active = true;
-    navigator.geolocation?.getCurrentPosition(({ coords }) => {
-      if (active) setDevicePosition({ lat: coords.latitude, lng: coords.longitude, accuracy: coords.accuracy });
-    }, () => {}, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
-    return () => { active = false; };
-  }, []);
+  const devicePosition = useInitialPosition();
   const [points, setPoints] = useState<Point[]>([]);
   const [mode, setMode] = useState<'draw' | 'mark' | 'route-start' | 'route-end' | 'route-via'>();
   const [pin, setPin] = useState<Point>();

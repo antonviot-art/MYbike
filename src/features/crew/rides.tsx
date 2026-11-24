@@ -7,6 +7,7 @@ import { useCrew } from './context';
 import { CrewShell } from './shell';
 import { kilometers, readSegments, type TrackPoint, type TrackStop } from './tracks';
 import { useTrackRecorder } from './use-track-recorder';
+import { useInitialPosition, type InitialPosition } from './use-initial-position';
 import { socialCall } from './social';
 import { livePilots } from './live-location';
 import type { CrewRecord } from './data';
@@ -66,20 +67,22 @@ export function RideStats({ distance, duration, motion, maxSpeed }: {
   </dl>;
 }
 
-export function TrackMap({ segments, position, stops = [], follow = false, pilots = [], focusPilots = false, photoMarkers = [], onPoint = ignoreMapClick }: {
+export function TrackMap({ segments, position, stops = [], follow = false, pilots = [], focusPilots = false, photoMarkers = [], initialPosition, onPoint = ignoreMapClick }: {
   segments: TrackPoint[][]; position?: Position | undefined; stops?: TrackStop[]; follow?: boolean; pilots?: ReturnType<typeof livePilots>; focusPilots?: boolean;
+  initialPosition?: InitialPosition | undefined;
   onPoint?: (lat: number, lng: number) => void;
   photoMarkers?: { lat: number; lng: number; label: string; category: string; url?: string }[];
 }) {
+  const ownPosition = position ? { lat: position.point[0], lng: position.point[1], accuracy: position.accuracy } : initialPosition;
   const markers = [
     ...photoMarkers,
     ...stops.map(stop => ({ lat: stop.point[0], lng: stop.point[1], label: stop.label })),
     ...pilots.map(pilot => ({ ...pilot, showName: true })),
-    ...(position ? [{ lat: position.point[0], lng: position.point[1], accuracy: position.accuracy, label: 'Ta position GPS', current: true, live: true }] : []),
+    ...(ownPosition ? [{ ...ownPosition, label: 'Ta position GPS', current: true, live: true }] : []),
   ];
   return <ClientOnly fallback={<div className="track-map map-canvas bg-secondary grid place-items-center">Chargement de la carte…</div>}>
     <Suspense fallback={<div className="track-map map-canvas bg-secondary" />}>
-      <div className="track-map"><MapView points={noPoints} segments={segments} markers={markers} follow={follow}
+      <div className="track-map"><MapView points={noPoints} segments={segments} markers={markers} follow={follow} initialPosition={initialPosition}
         focus={position ? 1 : focusPilots && pilots.length ? 2 : 0} focusGroup={focusPilots} onPoint={onPoint} /></div>
     </Suspense>
   </ClientOnly>;
@@ -203,6 +206,8 @@ export function RidesPage() {
 function RideRecorder() {
   const { user, name, records, add, positionClock, sharing, setSharing, favoriteRides } = useCrew();
   const draft = useTrackRecorder('mybike:track:' + (user?.id ?? 'demo'));
+  const devicePosition = useInitialPosition();
+  const initialPosition = draft.position || draft.segments.length ? undefined : devicePosition;
   const [saving, setSaving] = useState(false);
   const [discard, setDiscard] = useState(false);
   const [dashboard, setDashboard] = useState(false);
@@ -307,7 +312,7 @@ function RideRecorder() {
         {pilotFocusButton}
         {draft.recording && <Button onClick={() => { draft.stop(); setDashboard(false); }}><Square /> Arrêter</Button>}
       </div>
-      <TrackMap segments={draft.segments} position={draft.position} stops={draft.stops} pilots={pilots} focusPilots={focusPilots && pilots.length > 0} />
+      <TrackMap segments={draft.segments} position={draft.position} initialPosition={initialPosition} stops={draft.stops} pilots={pilots} focusPilots={focusPilots && pilots.length > 0} />
     </section>}
     <section hidden={tab !== 'mine'} className="ride-record gap-4" style={{ display: tab === 'mine' ? 'grid' : 'none' }}>
       <h2 className="text-xl font-semibold">Enregistrer un parcours</h2>
@@ -317,7 +322,7 @@ function RideRecorder() {
           {vehicles.map(item => <option value={item.id} key={item.id}>{String(item.payload['name'] ?? 'Moto')}</option>)}
         </select>
       </label>}
-      {!dashboard && <TrackMap segments={draft.segments} position={draft.position} stops={draft.stops} pilots={pilots} focusPilots={focusPilots && pilots.length > 0} />}
+      {!dashboard && <TrackMap segments={draft.segments} position={draft.position} initialPosition={initialPosition} stops={draft.stops} pilots={pilots} focusPilots={focusPilots && pilots.length > 0} />}
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <strong>{kilometers(draft.distance)}</strong><span>{duration}</span>
         {draft.recording && <span role="status">{draft.accuracy === undefined ? 'Recherche du signal GPS…' : draft.accuracy > 35 ? 'Signal GPS faible · en attente d’un meilleur point' : 'Précision GPS ± ' + draft.accuracy + ' m'}</span>}
