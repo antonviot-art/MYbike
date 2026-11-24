@@ -37,11 +37,22 @@ const storyTracks = [
   { id: 'ligne-rouge', title: 'Ligne rouge', style: 'Électro · 132 BPM' },
   { id: 'route-de-nuit', title: 'Route de nuit', style: 'Synthé · 98 BPM' },
   { id: 'poussiere', title: 'Poussière', style: 'Breakbeat · 112 BPM' },
+  { id: 'bitume', title: 'Bitume', style: 'Électro · 126 BPM' },
+  { id: 'derapage', title: 'Dérapage', style: 'Techno · 145 BPM' },
+  { id: 'virage', title: 'Virage', style: 'Basse · 114 BPM' },
+  { id: 'horizon', title: 'Horizon', style: 'Chill · 88 BPM' },
+  { id: 'after-ride', title: 'After Ride', style: 'Groove · 104 BPM' },
+  { id: 'plein-gaz', title: 'Plein gaz', style: 'Électro rapide · 150 BPM' },
+  { id: 'reflets', title: 'Reflets', style: 'Synthé · 92 BPM' },
+  { id: 'signal', title: 'Signal', style: 'Électro · 118 BPM' },
+  { id: 'crepuscule', title: 'Crépuscule', style: 'Chill · 80 BPM' },
 ] as const;
 
 function storyTrackUrl(track: (typeof storyTracks)[number]) {
   return '/story-music/' + track.id + '.wav';
 }
+
+type CommunityTrack = { id: string; title: string; author: string; path: string };
 
 const demo = [
   { key: 'ride', title: 'Tous au départ', date: '2026-11-15', session: 'Les Vosges' },
@@ -86,6 +97,14 @@ function MediaGallery({ initialRide, initialPost }: { initialRide: string | unde
   const [rideId, setRideId] = useState(initialRide ?? '');
   const [photoPoint, setPhotoPoint] = useState<TrackPoint>();
   const [choosingPoint, setChoosingPoint] = useState(false);
+  const communityTracks = useMemo(() => user ? records.flatMap((record): CommunityTrack[] => {
+    const path = record.payload['path'];
+    if (record.kind !== 'story-audio' || !record.author_id || typeof path !== 'string' ||
+        !path.startsWith(record.author_id + '/story-audio/')) return [];
+    return [{ id: record.id, title: String(record.payload['title'] || 'Son communautaire'),
+      author: String(record.payload['author'] || 'Pilote'), path }];
+  }).reverse() : [], [records, user]);
+
   const rides = records.filter(record => record.kind === 'ride-track').slice().reverse();
 
   const rideSegments = rides.find(ride => ride.id === rideId)?.payload['segments'];
@@ -149,7 +168,7 @@ function MediaGallery({ initialRide, initialPost }: { initialRide: string | unde
       if (files.some(file => file.size > 50 * 1024 * 1024)) throw new Error('Un fichier dépasse 50 Mo.');
       if (user && visibility === 'friends') await socialCall('mybike_friends_list', {});
       const folder = visibility === 'friends' ? 'friends' : undefined;
-      const track = story ? storyTracks.find(item => item.id === fields.get('musicId')) : undefined;
+      const track = story ? [...storyTracks, ...communityTracks].find(item => item.id === fields.get('musicId')) : undefined;
       for (const file of files) {
         const video = file.type.startsWith('video/');
         const extension = file.name.split('.').at(-1)?.match(/^[a-z\d]{1,8}$/i)?.[0] ?? (video ? 'mp4' : 'jpg');
@@ -250,7 +269,7 @@ function MediaGallery({ initialRide, initialPost }: { initialRide: string | unde
           <label className="grid gap-1">Photos ou vidéos<input type="file" className="w-full" accept="image/*,video/*,.heic,.heif" multiple disabled={busy}
             onChange={event => setFiles(Array.from(event.target.files ?? []))} /></label>
           {files.length > 0 && <p className="text-sm text-muted-foreground">{files.length} fichier(s) à publier</p>}
-          {publishing === 'story' && <StoryMusicPicker />}
+          {publishing === 'story' && <StoryMusicPicker community={communityTracks} />}
           <label className="grid gap-1">Description<textarea name="description" rows={3} maxLength={600} /></label>
           <label className="grid gap-1">Lien (facultatif)<input name="link" type="url" maxLength={500} placeholder="https://…" /></label>
           <label className="grid gap-1">Lieu (facultatif)<input name="place" maxLength={120} placeholder="Ex. Forêt de Clairvaux" /></label>
@@ -279,7 +298,7 @@ function MediaGallery({ initialRide, initialPost }: { initialRide: string | unde
       </DialogContent>
     </Dialog>
     <Dialog open={Boolean(selected)} onOpenChange={open => { if (!open) setSelected(undefined); }}>
-      {selected?.storyUntil ? <StoryViewer key={selected.id} item={selected} close={() => setSelected(undefined)} download={download} /> : selected && <DialogContent className="max-h-[90dvh] max-w-3xl overflow-y-auto">
+      {selected?.storyUntil ? <StoryViewer key={selected.id} item={selected} community={communityTracks.find(track => track.id === selected.musicId)} close={() => setSelected(undefined)} download={download} /> : selected && <DialogContent className="max-h-[90dvh] max-w-3xl overflow-y-auto">
         <DialogTitle>{selected.title}</DialogTitle>
         <DialogDescription>{selected.session}</DialogDescription>
         {selected.video ? <video src={selected.url} controls className="w-full max-h-[60vh]" /> : <img src={selected.url} alt={selected.title} className="w-full max-h-[60vh] object-contain" />}
@@ -308,30 +327,93 @@ function FeedVideo({ url }: { url: string }) {
   return <video ref={ref} src={url} muted playsInline controls preload="metadata" className="media-video" />;
 }
 
-function StoryMusicPicker() {
+function StoryMusicPicker({ community }: { community: CommunityTrack[] }) {
   const [id, setId] = useState('');
   const track = storyTracks.find(item => item.id === id);
+  const communityTrack = community.find(item => item.id === id);
+  const [preview, setPreview] = useState<{ path: string; url: string }>();
+  useEffect(() => {
+    if (!communityTrack) return;
+    let active = true;
+    void resolveMedia(communityTrack.path).then(url => {
+      if (active) setPreview({ path: communityTrack.path, url });
+    }).catch(() => { if (active) toast.error('Aperçu indisponible.'); });
+    return () => { active = false; };
+  }, [communityTrack]);
+  const previewUrl = track ? storyTrackUrl(track) : preview?.path === communityTrack?.path ? preview?.url : undefined;
   return <div className="grid gap-2">
     <label className="grid gap-1">Ajouter une musique
       <select name="musicId" value={id} onChange={event => setId(event.currentTarget.value)}>
         <option value="">Sans musique</option>
-        {storyTracks.map(item => <option key={item.id} value={item.id}>{item.title} · {item.style}</option>)}
+        <optgroup label="Catalogue MYbike">
+          {storyTracks.map(item => <option key={item.id} value={item.id}>{item.title} · {item.style}</option>)}
+        </optgroup>
+        <optgroup label="Communauté">
+          {community.length ? community.map(item => <option key={item.id} value={item.id}>{item.title} · {item.author}</option>)
+            : <option disabled>Aucun son partagé</option>}
+        </optgroup>
       </select>
     </label>
-    {track && <audio key={track.id} src={storyTrackUrl(track)} className="w-full" controls preload="none" aria-label={'Aperçu de ' + track.title} />}
+    {previewUrl && <audio key={id} src={previewUrl} className="w-full" controls preload="none" aria-label="Aperçu du morceau" />}
+    <CommunityMusicUpload />
   </div>;
 }
 
-function StoryViewer({ item, close, download }: { item: MediaItem; close: () => void; download: () => Promise<void> }) {
+function CommunityMusicUpload() {
+  const { add, upload, user, name } = useCrew();
+  const [title, setTitle] = useState('');
+  const [file, setFile] = useState<File>();
+  const [rights, setRights] = useState(false);
+  const [busy, setBusy] = useState(false);
+  if (!user) return <p className="text-sm text-muted-foreground">Connecte-toi pour partager un son avec la communauté.</p>;
+
+  async function shareSound() {
+    if (!file || !title.trim() || !rights || busy) return;
+    const extension = file.name.split('.').at(-1)?.toLowerCase();
+    if (!extension || !['mp3', 'm4a', 'aac', 'wav', 'ogg', 'opus', 'flac', 'webm'].includes(extension) ||
+      (file.type && !file.type.startsWith('audio/')) || file.size < 1 || file.size > 15 * 1024 * 1024) {
+      toast.error('Choisis un fichier audio valide de 15 Mo maximum.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const path = await upload(file, extension, 'story-audio');
+      await add('story-audio', { path, title: title.trim(), author: name });
+      setTitle('');
+      setFile(undefined);
+      setRights(false);
+      toast.success('Son ajouté à la catégorie Communauté.');
+    } catch { toast.error('Le son n’a pas pu être partagé.'); }
+    finally { setBusy(false); }
+  }
+
+  return <details className="rounded-lg border border-border p-3">
+    <summary className="cursor-pointer text-sm font-semibold">Importer un son dans Communauté</summary>
+    <div className="mt-3 grid gap-2 text-sm">
+      <label className="grid gap-1">Titre<input value={title} onChange={event => setTitle(event.currentTarget.value)} maxLength={80} /></label>
+      <label className="grid gap-1">Fichier audio<input key={file ? 'selected' : 'empty'} type="file" accept="audio/*" onChange={event => setFile(event.currentTarget.files?.[0])} /></label>
+      {file && <p className="break-all">{file.name}</p>}
+      <label className="flex items-start gap-2"><input type="checkbox" checked={rights} onChange={event => setRights(event.currentTarget.checked)} />
+        J’ai le droit de partager ce son et d’autoriser les membres à l’utiliser dans leurs stories.
+      </label>
+      <Button type="button" variant="outline" disabled={busy || !file || !title.trim() || !rights} onClick={() => void shareSound()}>
+        {busy ? 'Importation…' : 'Partager le son'}
+      </Button>
+    </div>
+  </details>;
+}
+
+function StoryViewer({ item, community, close, download }: { item: MediaItem; community?: CommunityTrack | undefined; close: () => void; download: () => Promise<void> }) {
   const [audio, setAudio] = useState('');
   const [menu, setMenu] = useState(false);
   const track = storyTracks.find(entry => entry.id === item.musicId);
   useEffect(() => {
-    if (!item.music || track) return;
+    const path = community?.path ?? item.music;
+    if (!path || track) return;
     let active = true;
-    void resolveMedia(item.music).then(url => { if (active) setAudio(url); }).catch(() => {});
+    void resolveMedia(path).then(url => { if (active) setAudio(url); }).catch(() => {});
     return () => { active = false; };
-  }, [item.music, track]);
+  }, [item.music, track, community?.path]);
   const gps = item.gps;
   return <DialogContent fullscreen hideCloseButton className="story-viewer">
     <DialogTitle className="sr-only">Story de {item.authorName}</DialogTitle>
@@ -352,7 +434,8 @@ function StoryViewer({ item, close, download }: { item: MediaItem; close: () => 
     <div className="story-caption">
       {item.description && <p>{item.description}</p>}
       {track ? <div className="story-music"><span>♫ {track.title}</span><audio src={storyTrackUrl(track)} autoPlay loop controls aria-label={'Musique de la story · ' + track.title} /></div>
-        : audio && <audio src={audio} controls preload="none" aria-label="Musique de la story" />}
+        : audio && <div className="story-music">{community && <span>♫ {community.title}</span>}
+          <audio src={audio} controls autoPlay={Boolean(community)} loop={Boolean(community)} aria-label="Musique de la story" /></div>}
     </div>
   </DialogContent>;
 }
