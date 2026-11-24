@@ -1,9 +1,13 @@
-﻿import { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useCrew } from './context';
 
-type Marker = { lat: number; lng: number; label: string; live?: boolean; current?: boolean; accuracy?: number; showName?: boolean; url?: string; color?: string };
+const pinIcons = {
+  rasso: '⚑', event: '▦', fuel: '⛽', charging: 'ϟ', parking: 'P', other: '📍',
+};
+
+type Marker = { lat: number; lng: number; label: string; live?: boolean; current?: boolean; accuracy?: number; showName?: boolean; url?: string; color?: string; category?: string; onRemove?: (() => void) | undefined };
 
 export default function MapView({ points, segments, markers, focus, focusGroup = false, follow = false, onPoint, onCenter }: {
   points: [number, number][];
@@ -13,7 +17,7 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
   focusGroup?: boolean;
   follow?: boolean;
   onPoint: (lat: number, lng: number) => void;
-  onCenter?: (lat: number, lng: number) => void;
+  onCenter?: (lat: number, lng: number, zoom: number) => void;
 }) {
   const el = useRef<HTMLDivElement>(null);
   const { aerial } = useCrew();
@@ -37,7 +41,7 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
     instance.on('click', event => callback.current(event.latlng.lat, event.latlng.lng));
     instance.on('moveend', () => {
       const center = instance.getCenter().wrap();
-      centerCallback.current?.(center.lat, center.lng);
+      centerCallback.current?.(center.lat, center.lng, instance.getZoom());
     });
     const resize = new ResizeObserver(() => instance.invalidateSize({ pan: false }));
     resize.observe(el.current);
@@ -69,7 +73,6 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
     group.clearLayers();
     const styles = getComputedStyle(document.documentElement);
     const color = styles.getPropertyValue('--primary').trim();
-    const liveColor = styles.getPropertyValue('--success').trim();
     for (const marker of markers) {
       if (!Number.isFinite(marker.lat) || !Number.isFinite(marker.lng)) continue;
       const label = marker.url ? document.createElement('a') : document.createElement('span');
@@ -77,11 +80,34 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
       label.textContent = marker.label;
       if (marker.current) {
         const center: L.LatLngTuple = [marker.lat, marker.lng];
-        if (marker.accuracy) L.circle(center, { radius: Math.min(150, marker.accuracy), color: '#60a5fa', weight: 1, fillOpacity: 0.16 }).addTo(group);
-        L.circleMarker(center, { radius: 8, color: 'white', fillColor: '#2563eb', fillOpacity: 1, weight: 3 }).bindPopup(label).addTo(group);
+        if (marker.accuracy) L.circle(center, { radius: Math.min(150, marker.accuracy), color: '#22c55e', weight: 1, fillOpacity: 0.16 }).addTo(group);
+        L.circleMarker(center, { radius: 8, color: 'white', fillColor: '#16a34a', fillOpacity: 1, weight: 3 }).bindPopup(label).addTo(group);
         continue;
       }
-      const options = { radius: 8, color: marker.live ? liveColor : marker.color ?? color, fillOpacity: 0.7, weight: 3 };
+      if (!marker.live) {
+        const popup = document.createElement('div');
+        popup.append(label);
+        if (marker.onRemove) {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'map-pin-remove';
+          button.textContent = 'Supprimer le repère';
+          button.addEventListener('click', marker.onRemove);
+          popup.append(button);
+        }
+        const icon = document.createElement('span');
+        icon.className = 'map-pin-icon';
+        icon.style.backgroundColor = marker.color ?? color;
+        const category = marker.category as keyof typeof pinIcons;
+        icon.textContent = Object.hasOwn(pinIcons, category) ? pinIcons[category] : pinIcons.other;
+        L.marker([marker.lat, marker.lng], {
+          title: marker.label,
+          alt: marker.label,
+          icon: L.divIcon({ className: 'map-pin', html: icon, iconSize: [28, 34], iconAnchor: [14, 34], popupAnchor: [0, -32] }),
+        }).bindPopup(popup).addTo(group);
+        continue;
+      }
+      const options = { radius: 7, color: 'white', fillColor: '#2563eb', fillOpacity: 1, weight: 2 };
       const dot = L.circleMarker([marker.lat, marker.lng], options).bindPopup(label).addTo(group);
       if (marker.showName) dot.bindTooltip(label.cloneNode(true) as HTMLElement, { direction: 'top', offset: [0, -8], permanent: true });
     }

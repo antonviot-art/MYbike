@@ -343,3 +343,8 @@ input:focus, textarea:focus { outline: 1px solid var(--primary); }
 
 .map-categories { display: flex; flex-wrap: wrap; gap: 5px; }
 .map-screen:has(.map-share-tip) .map-categories { top: 62px; }
+
+.map-place-status { padding: 5px 8px; border-radius: 8px; background: var(--background); font-size: 12px; }
+.map-pin-icon { position: relative; display: grid; width: 28px; height: 28px; place-items: center; border: 2px solid white; border-radius: 50%; color: white; font-size: 16px; font-weight: 700; box-shadow: 0 2px 6px #0006; }
+.map-pin-icon::after { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 5px solid transparent; border-top-color: white; content: ''; }
+.map-pin-remove { display: block; margin-top: 6px; color: #b91c1c; text-decoration: underline; }

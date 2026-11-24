@@ -1,4 +1,4 @@
-import { lazy, Suspense, useRef, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 import { ClientOnly } from '@tanstack/react-router';
 import { ArrowRight, Layers, Navigation, Upload, MapPin, Route, LocateFixed, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,7 @@ import { readSegments } from './tracks';
 import { livePilots } from './live-location';
 import { toast } from 'sonner';
 
+const noPoints: Point[] = [];
 const MapView = lazy(() => import('./map-view'));
 type Point = [number, number];
 const categories = [
@@ -23,7 +24,7 @@ const osmTags = { fuel: 'fuel', charging: 'charging_station', parking: 'parking'
 type NearbyPlace = { lat: number; lng: number; label: string; color: string; category: string };
 
 export function MapPage() {
-  const { records, add, user, sharing, setSharing, positionClock, aerial, setAerial } = useCrew();
+  const { records, add, remove, user, sharing, setSharing, positionClock, aerial, setAerial } = useCrew();
   const [focus, setFocus] = useState(0);
   const [points, setPoints] = useState<Point[]>([]);
   const [mode, setMode] = useState<'draw' | 'mark'>();
@@ -33,56 +34,87 @@ export function MapPage() {
   const [nearby, setNearby] = useState<NearbyPlace[]>([]);
   const nearbyCache = useRef(new Map<string, { expires: number; places: NearbyPlace[] }>());
   const [searching, setSearching] = useState(false);
-  const center = useRef<Point>([48.067, 6.862]);
-  const lastSearch = useRef(0);
+  const [viewport, setViewport] = useState({ lat: 48.067, lng: 6.862, zoom: 12 });
+  const [deletePin, setDeletePin] = useState<{ id: string; label: string }>();
+  const [placeError, setPlaceError] = useState(false);
+  const hasPlaces = category === 'all' || Object.hasOwn(osmTags, category);
+  const radius = Math.min(18000, Math.round(6000 * 2 ** (12 - viewport.zoom)));
+  const step = radius / 240000;
+  const lat = (Math.round(viewport.lat / step) * step).toFixed(5);
+  const lng = (Math.round(viewport.lng / step) * step).toFixed(5);
+  const showPlaces = hasPlaces && viewport.zoom >= 10;
   const markers = [
-    ...(!user && (category === 'all' || category === 'parking') ? [{ lat: 48.065, lng: 6.863, label: 'Parking du lac · Démo', color: '#2563eb', live: false }] : []),
+    ...(!user && (category === 'all' || category === 'parking') ? [{ lat: 48.065, lng: 6.863, label: 'Parking du lac · Démo', color: '#2563eb', category: 'parking', live: false }] : []),
     ...records.filter(record => record.kind === 'marker' && (category === 'all' || (record.payload['category'] ?? 'other') === category)).map(record => ({
       lat: Number(record.payload['lat']), lng: Number(record.payload['lng']),
       label: String(record.payload['label']), live: false,
+      category: String(record.payload['category'] ?? 'other'),
+      onRemove: (user ? record.author_id === user.id : !record.author_id && /^[0-9a-f-]{36}$/i.test(record.id))
+        ? () => setDeletePin({ id: record.id, label: String(record.payload['label']) }) : undefined,
       color: categories.find(item => item.id === record.payload['category'])?.color ?? '#475569',
     })),
     ...((category === 'all' || category === 'event') ? records.flatMap(record => {
       if (record.kind !== 'rasso' || !(Date.parse(String(record.payload['when'])) > Date.now())) return [];
       const point = readSegments([[record.payload['pin']]])[0]?.[0];
-      return point ? [{ lat: point[0], lng: point[1], label: String(record.payload['title']), live: false, color: '#dc2626', url: '/rasso?id=' + encodeURIComponent(record.id) }] : [];
+      return point ? [{ lat: point[0], lng: point[1], label: String(record.payload['title']), live: false, color: '#dc2626', category: 'rasso', url: '/rasso?id=' + encodeURIComponent(record.id) }] : [];
     }) : []),
-    ...livePilots(records, positionClock),
-    ...nearby.filter(place => place.category === category).map(place => ({ ...place, live: false })),
+    ...livePilots(records, positionClock, user?.id),
+    ...(sharing && user ? livePilots(records.filter(record => record.author_id === user.id), positionClock)
+      .map(marker => ({ ...marker, current: true, label: 'Ta position' })) : []),
+    ...(showPlaces ? nearby : []).filter(place => category === 'all' || place.category === category).map(place => ({ ...place, live: false })),
   ];
   const sharedRoutes = records.filter(record => record.kind === 'route');
 
-  async function findPlaces() {
-    if (searching || !Object.hasOwn(osmTags, category) || Date.now() - lastSearch.current < 5000) return;
-    const kind = category as keyof typeof osmTags;
-    const item = categories.find(entry => entry.id === kind)!;
-    const [lat, lng] = center.current.map(value => value.toFixed(3));
-    const key = [kind, lat, lng].join(':');
+  useEffect(() => {
+    setSearching(false);
+    setPlaceError(false);
+    const key = [category, lat, lng, radius].join(':');
     const cached = nearbyCache.current.get(key);
-    if (cached && cached.expires > Date.now()) { setNearby(cached.places); return; }
-    setSearching(true);
-    lastSearch.current = Date.now();
+    const valid = cached && cached.expires > Date.now();
+    setNearby(showPlaces && valid ? cached.places : []);
+    if (!showPlaces || valid) return;
     const request = new AbortController();
-    const timeout = window.setTimeout(() => request.abort(), 12000);
-    try {
-      const data = `[out:json][timeout:8];nwr["amenity"="${osmTags[kind]}"](around:4500,${lat},${lng});out center 100;`;
-      const response = await fetch('https://ovp.dresel.systems/api/interpreter?' + new URLSearchParams({ data }), { signal: request.signal });
-      if (!response.ok) throw new Error();
-      const json = await response.json() as { elements?: { lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: { name?: string; brand?: string } }[] };
-      const places = (json.elements ?? []).flatMap(place => {
-        const latitude = place.lat ?? place.center?.lat;
-        const longitude = place.lon ?? place.center?.lon;
-        return latitude === undefined || longitude === undefined ? [] : [{
-          lat: latitude, lng: longitude, label: (place.tags?.name || place.tags?.brand || item.label) + ' · OpenStreetMap', color: item.color, category: kind,
-        }];
-      });
-      if (nearbyCache.current.size >= 24) nearbyCache.current.clear();
-      nearbyCache.current.set(key, { expires: Date.now() + 300000, places });
-      setNearby(places);
-      toast.info(places.length ? places.length + ' lieux OpenStreetMap affichés' : 'Aucun lieu OpenStreetMap trouvé dans cette zone.');
-    } catch { toast.error('La recherche OpenStreetMap est indisponible. Les repères MYbike restent visibles.'); }
-    finally { window.clearTimeout(timeout); setSearching(false); }
-  }
+    let active = true;
+    let timeout = 0;
+    const debounce = window.setTimeout(async () => {
+      setSearching(true);
+      timeout = window.setTimeout(() => request.abort(), 12000);
+      try {
+        const kinds = (Object.keys(osmTags) as (keyof typeof osmTags)[])
+          .filter(kind => category === 'all' || category === kind);
+        const queries = kinds.map(kind => `nwr["amenity"="${osmTags[kind]}"](around:${radius},${lat},${lng});out center 100;`);
+        const data = '[out:json][timeout:8];' + queries.join('');
+        const response = await fetch('https://ovp.dresel.systems/api/interpreter?' + new URLSearchParams({ data }), { signal: request.signal });
+        if (!response.ok) throw new Error();
+        const json = await response.json() as { remark?: string; elements?: { lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: { amenity?: string; name?: string; brand?: string } }[] };
+        if (json.remark) throw new Error();
+        const places = (json.elements ?? []).flatMap(place => {
+          const latitude = place.lat ?? place.center?.lat;
+          const longitude = place.lon ?? place.center?.lon;
+          const item = categories.find(entry => kinds.some(kind => kind === entry.id && osmTags[kind] === place.tags?.amenity));
+          return !item || latitude === undefined || longitude === undefined ? [] : [{
+            lat: latitude, lng: longitude, label: (place.tags?.name || place.tags?.brand || item.label) + ' · OpenStreetMap',
+            color: item.color, category: item.id,
+          }];
+        });
+        if (!active) return;
+        if (nearbyCache.current.size >= 24) nearbyCache.current.clear();
+        nearbyCache.current.set(key, { expires: Date.now() + 300000, places });
+        setNearby(places);
+      } catch {
+        if (active) setPlaceError(true);
+      } finally {
+        window.clearTimeout(timeout);
+        if (active) setSearching(false);
+      }
+    }, 850);
+    return () => {
+      active = false;
+      window.clearTimeout(debounce);
+      window.clearTimeout(timeout);
+      request.abort();
+    };
+  }, [category, lat, lng, radius, showPlaces]);
 
   async function savePin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -108,7 +140,7 @@ export function MapPage() {
       <section className="map-screen" aria-label="Carte des sorties">
         <ClientOnly fallback={<div className="map-canvas bg-secondary grid place-items-center">Chargement de la carte…</div>}>
           <Suspense fallback={<div className="map-canvas bg-secondary" />}>
-            <MapView points={points} markers={markers} focus={focus} onCenter={(lat, lng) => { center.current = [lat, lng]; }} onPoint={(lat, lng) => {
+            <MapView points={category === 'location' && !mode ? noPoints : points} markers={markers} focus={focus} onCenter={(lat, lng, zoom) => setViewport({ lat, lng, zoom })} onPoint={(lat, lng) => {
               if (mode === 'draw') setPoints(current => [...current, [lat, lng]]);
               if (mode === 'mark') { setPin([lat, lng]); setMode(undefined); }
             }} />
@@ -117,11 +149,12 @@ export function MapPage() {
         <div className="map-categories">
           <select aria-label="Catégorie de lieux" value={category} onChange={event => setCategory(event.target.value)}>
             <option value="all">Tous les lieux</option>
+            <option value="location">Localisation seulement</option>
             {categories.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
           </select>
-          {Object.hasOwn(osmTags, category) && <Button size="sm" variant="secondary" disabled={searching} onClick={() => void findPlaces()}>
-            {searching ? 'Recherche…' : 'Chercher dans cette zone'}
-          </Button>}
+          {hasPlaces && (!showPlaces || searching || placeError) && <span role="status" className="map-place-status">
+            {!showPlaces ? 'Zoome pour afficher les lieux OpenStreetMap.' : placeError ? 'Lieux OpenStreetMap indisponibles.' : 'Chargement des lieux…'}
+          </span>}
         </div>
         <div className="map-tools" aria-label="Outils de la carte">
           {user && !sharing && <div className="map-share-tip" role="status">
@@ -149,10 +182,10 @@ export function MapPage() {
           {points.length > 1 && <Button size="icon" variant="secondary" title="Partager le parcours" aria-label="Partager le parcours" onClick={() => void add('route', { points, name: 'Parcours du groupe' })
             .then(() => toast.success('Parcours partagé.')).catch(() => toast.error('Le parcours n’a pas été partagé.'))}><Share2 /></Button>}
         </div>
-        {(mode || sharing || sharedRoutes.length > 0) && <div className="map-status">
+        {(mode || sharing || sharedRoutes.length > 0 && category !== 'location') && <div className="map-status">
           {sharing && <p>Position partagée avec les membres connectés.</p>}
           {mode && <p>{mode === 'draw' ? 'Touche la carte pour tracer ton parcours.' : 'Touche la carte pour placer le repère.'}</p>}
-          {sharedRoutes.length > 0 && <select aria-label="Parcours partagés" value="" onChange={event => {
+          {category !== 'location' && sharedRoutes.length > 0 && <select aria-label="Parcours partagés" value="" onChange={event => {
             const record = sharedRoutes.find(item => item.id === event.target.value);
             if (record) setPoints(record.payload['points'] as Point[]);
           }}>
@@ -167,11 +200,27 @@ export function MapPage() {
           <DialogDescription>Publie un lieu sur la carte de la communauté MYbike.</DialogDescription>
           <form className="grid gap-3" onSubmit={savePin}>
             <input name="label" placeholder="Ex. Rendez-vous au parking" aria-label="Nom du repère" maxLength={80} required />
-            <label className="grid gap-1">Catégorie<select name="category" defaultValue={category === 'all' ? 'other' : category}>
+            <label className="grid gap-1">Catégorie<select name="category" defaultValue={categories.find(item => item.id === category)?.id ?? 'other'}>
               {categories.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
             </select></label>
             <Button disabled={saving}>Enregistrer le repère</Button>
           </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(deletePin)} onOpenChange={open => { if (!open && !saving) setDeletePin(undefined); }}>
+        <DialogContent>
+          <DialogTitle>Supprimer le repère</DialogTitle>
+          <DialogDescription>Retirer « {deletePin?.label} » de la carte MYbike ?</DialogDescription>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" disabled={saving} onClick={() => setDeletePin(undefined)}>Annuler</Button>
+            <Button variant="destructive" disabled={saving} onClick={async () => {
+              if (!deletePin || saving) return;
+              setSaving(true);
+              try { await remove(deletePin.id); setDeletePin(undefined); }
+              catch { toast.error('Impossible de supprimer le repère.'); }
+              finally { setSaving(false); }
+            }}>Supprimer</Button>
+          </div>
         </DialogContent>
       </Dialog>
     </CrewShell>
