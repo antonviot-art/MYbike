@@ -68,8 +68,9 @@ export function RideStats({ distance, duration, motion, maxSpeed }: {
   </dl>;
 }
 
-export function TrackMap({ segments, position, stops = [], follow = false, pilots = [], focusPilots = false, photoMarkers = [], initialPosition, onPoint = ignoreMapClick }: {
+export function TrackMap({ segments, position, stops = [], follow = false, pilots = [], focusPilots = false, photoMarkers = [], comparison, initialPosition, onPoint = ignoreMapClick }: {
   segments: TrackPoint[][]; position?: Position | undefined; stops?: TrackStop[]; follow?: boolean; pilots?: ReturnType<typeof livePilots>; focusPilots?: boolean;
+  comparison?: TrackPoint[] | undefined;
   initialPosition?: InitialPosition | undefined;
   onPoint?: (lat: number, lng: number) => void;
   photoMarkers?: { lat: number; lng: number; label: string; category: string; url?: string }[];
@@ -83,7 +84,7 @@ export function TrackMap({ segments, position, stops = [], follow = false, pilot
   ];
   return <ClientOnly fallback={<div className="track-map map-canvas bg-secondary grid place-items-center">Chargement de la carte…</div>}>
     <Suspense fallback={<div className="track-map map-canvas bg-secondary" />}>
-      <div className="track-map"><MapView points={noPoints} segments={segments} markers={markers} follow={follow} initialPosition={initialPosition}
+      <div className="track-map"><MapView points={noPoints} segments={segments} markers={markers} paths={comparison ? [{ segments: [comparison], label: 'Tour comparé' }] : []} follow={follow} initialPosition={initialPosition}
         focus={position ? 1 : focusPilots && pilots.length ? 2 : 0} focusGroup={focusPilots} onPoint={onPoint} /></div>
     </Suspense>
   </ClientOnly>;

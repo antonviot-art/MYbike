@@ -10,7 +10,7 @@ import { DifficultyBadge, RideFavorite, RideStats, TrackMap } from './rides';
 import { createRideSpeed } from './ride-speed';
 import type { RouteManeuver, SuggestedRide } from './valhalla.server';
 import { metersBetween, routeProgress, readSegments, readStops, type TrackPoint } from './tracks';
-import { CircuitRecorder, formatLap, LapResults, readLapTimes } from './circuit-recorder';
+import { CircuitRecorder, formatLap, LapComparison, LapResults, readLapTimes } from './circuit-recorder';
 import type { CrewRecord } from './data';
 
 export function RideDetailPage({ rideId, start = false }: { rideId: string; start?: boolean }) {
@@ -144,19 +144,18 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
     finally { setReturning(false); }
   }
 
-  const ranking = new Map<string, { name: string; laps: number[] }>();
-  function addRanking(author: string, name: string, value: unknown) {
-    const laps = readLapTimes(value);
-    if (laps.length) ranking.set(author, { name, laps: [...(ranking.get(author)?.laps ?? []), ...laps] });
+  const ranking = new Map<string, { name: string; best: number; vehicle: string; sessions: CrewRecord[] }>();
+  if (publicCircuit) for (const result of [ride, ...records.filter(item => item.kind === 'circuit-lap' && item.payload['circuitId'] === ride.id)]) {
+    const author = result.author_id;
+    const best = Math.min(...readLapTimes(result.payload['laps']));
+    if (!author || !Number.isFinite(best)) continue;
+    const previous = ranking.get(author);
+    const sessions = [...(previous?.sessions ?? []), result];
+    ranking.set(author, previous && previous.best <= best ? { ...previous, sessions } : {
+      name: String(result.payload['pilot'] || 'Pilote'), best, vehicle: String(result.payload['vehicleName'] || ''), sessions,
+    });
   }
-  if (publicCircuit && ride.author_id) addRanking(ride.author_id, String(payload['pilot'] || 'Pilote'), payload['laps']);
-  if (publicCircuit) for (const result of records) {
-    if (result.kind === 'circuit-lap' && result.author_id && result.payload['circuitId'] === ride.id) {
-      addRanking(result.author_id, String(result.payload['pilot'] || 'Pilote'), result.payload['laps']);
-    }
-  }
-  const ranked = [...ranking.entries()].map(([id, entry]) => ({ id, ...entry, best: Math.min(...entry.laps) }))
-    .sort((a, b) => a.best - b.best);
+  const ranked = [...ranking.entries()].map(([id, entry]) => ({ id, ...entry })).sort((a, b) => a.best - b.best);
   const alreadyPublished = publishedCopy || records.some(record => record.author_id === user?.id && record.payload['publishedFromCircuit'] === ride.id);
   async function publishCircuit() {
     if (publishingCircuit || alreadyPublished || !user || user.id !== ride.author_id) return;
@@ -203,7 +202,7 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
       {Boolean(payload['description']) && <p className="whitespace-pre-wrap break-words">{String(payload['description'])}</p>}
       <div className="flex flex-wrap items-center gap-2"><DifficultyBadge ride={ride} /><RideFavorite rideId={ride.id} /></div>
       <h3 className="text-lg font-semibold">{payload['planned'] === true ? 'Trajet prévu' : 'Bilan de sortie'}</h3>
-      <LapResults value={payload['laps']} />
+      {isCircuit && !publicCircuit && <CircuitSession payload={payload} />}
       {isCircuit && !publicCircuit && user?.id === ride.author_id && user && <Button className="justify-self-start" disabled={publishingCircuit || alreadyPublished} onClick={() => void publishCircuit()}>{alreadyPublished ? 'Boucle publiée' : 'Publier la boucle'}</Button>}
       <RideStats distance={Number(payload['distance']) || 0} duration={Number(payload['duration']) || 0} motion={motionStats} maxSpeed={maxSpeed} />
     </section>
@@ -214,8 +213,8 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
         <Button variant="outline" asChild><Link to="/map" search={{ circuit: ride.id }}><MapPin /> Aller à la boucle</Link></Button>
       </div>
       {ranked.length ? <ol className="grid gap-2">{ranked.map((pilot, index) => <li key={pilot.id}>
-        <details><summary className="cursor-pointer">{index + 1}. {pilot.name} · <strong>{formatLap(pilot.best)}</strong></summary>
-          <LapResults value={pilot.laps} />
+        <details><summary className="cursor-pointer">{index + 1}. {pilot.name}{pilot.vehicle ? ' · ' + pilot.vehicle : ''} · <strong>{formatLap(pilot.best)}</strong></summary>
+          <div className="mt-2 grid gap-3">{pilot.sessions.map(session => <CircuitSession key={session.id} payload={session.payload} />)}</div>
         </details>
       </li>)}</ol> : <p className="text-sm text-muted-foreground">Aucun chrono publié.</p>}
       <div hidden={!racing}><CircuitRecorder blocked={following} circuit={ride} /></div>
@@ -260,6 +259,16 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
         : <p className="text-muted-foreground">Aucune photo associée à ce parcours.</p>}
     </section>
   </>;
+}
+
+function CircuitSession({ payload }: { payload: CrewRecord['payload'] }) {
+  const details = [payload['vehicleName'], payload['surface']].filter(value => typeof value === 'string' && value.trim()).join(' · ');
+  return <div className="grid gap-2">
+    {details && <p className="text-sm text-muted-foreground">{details}</p>}
+    {typeof payload['sessionNotes'] === 'string' && payload['sessionNotes'] && <p className="whitespace-pre-wrap break-words text-sm">{payload['sessionNotes']}</p>}
+    <LapResults value={payload['laps']} />
+    <LapComparison value={payload['lapTraces']} times={payload['laps']} />
+  </div>;
 }
 
 export function RidePhoto({ photo }: { photo: CrewRecord }) {
