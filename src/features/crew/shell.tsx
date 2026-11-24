@@ -15,7 +15,7 @@ const tabs = [
   { to: '/', label: 'Accueil', icon: House },
   { to: '/discussion', label: 'Discussion', icon: MessageSquare },
   { to: '/vehicules', label: 'Véhicules', icon: Bike },
-  { to: '/map', label: 'Localiser', icon: Map },
+  { to: '/map', label: 'Plan', icon: Map },
   { to: '/parcours', label: 'Parcours', icon: RouteIcon },
   { to: '/rasso', label: 'Rasso', icon: CalendarDays },
   { to: '/medias', label: 'Médias', icon: Images },
@@ -196,11 +196,11 @@ export function CrewShell({ tab, immersive = false, signInOnOpen = false, childr
           </div>
         </div>
       </header>}
-      <main className={immersive ? 'app-conversation-main' : tab === 'Localiser' ? 'app-map-main' : 'app-width app-main pt-8 sm:pt-10'}>
-        {!immersive && tab !== 'Accueil' && tab !== 'Localiser' && <h1 className="page-title mb-6">{tab}</h1>}
-        {!immersive && loading && tab !== 'Localiser' && <p role="status" className="mb-3 text-sm text-muted-foreground">Synchronisation…</p>}
+      <main className={immersive ? 'app-conversation-main' : tab === 'Plan' ? 'app-map-main' : 'app-width app-main pt-8 sm:pt-10'}>
+        {!immersive && tab !== 'Accueil' && tab !== 'Plan' && <h1 className="page-title mb-6">{tab}</h1>}
+        {!immersive && loading && tab !== 'Plan' && <p role="status" className="mb-3 text-sm text-muted-foreground">Synchronisation…</p>}
         {immersive ? children : <div className="page-enter">{children}</div>}
-        {!immersive && !user && tab !== 'Localiser' && (
+        {!immersive && !user && tab !== 'Plan' && (
           <footer className="app-footer flex items-center gap-2">
             <LockKeyhole size={13} /> Données fictives · modifications temporaires
           </footer>

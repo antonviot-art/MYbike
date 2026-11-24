@@ -26,6 +26,8 @@ type NearbyPlace = { lat: number; lng: number; label: string; color: string; cat
 
 export function MapPage() {
   const { records, add, remove, user, sharing, setSharing, positionClock, aerial, setAerial } = useCrew();
+  const [view, setView] = useState<'locate' | 'route'>('locate');
+  const locating = view === 'locate';
   const [focus, setFocus] = useState(0);
   const [devicePosition, setDevicePosition] = useState<{ lat: number; lng: number; accuracy: number }>();
   useEffect(() => {
@@ -58,7 +60,7 @@ export function MapPage() {
   const step = radius / 240000;
   const lat = (Math.round(viewport.lat / step) * step).toFixed(5);
   const lng = (Math.round(viewport.lng / step) * step).toFixed(5);
-  const showPlaces = hasPlaces && viewport.zoom >= 10;
+  const showPlaces = locating && hasPlaces && viewport.zoom >= 10;
   const sharedPosition = sharing && user ? livePilots(records.filter(record => record.author_id === user.id), positionClock)[0] : undefined;
   const ownPosition = sharedPosition ?? devicePosition;
   const markers = [
@@ -155,7 +157,6 @@ export function MapPage() {
       }
       const route = await response.json() as SuggestedRide;
       setSuggested(route);
-      if (category === 'location') setCategory('all');
     } catch { setRouteError('Le calcul est indisponible pour le moment.'); }
     finally { setRouteBusy(false); }
   }
@@ -180,12 +181,16 @@ export function MapPage() {
   }
 
   return (
-    <CrewShell tab="Localiser">
+    <CrewShell tab="Plan">
+      <div className="map-view-tabs" aria-label="Vues du plan">
+        <Button size="sm" variant={locating ? 'default' : 'outline'} aria-pressed={locating} onClick={() => { setView('locate'); setMode(undefined); }}><LocateFixed /> Localiser</Button>
+        <Button size="sm" variant={!locating ? 'default' : 'outline'} aria-pressed={!locating} onClick={() => { setView('route'); setMode(undefined); }}><Signpost /> Itinéraire</Button>
+      </div>
       <section className="map-screen" aria-label="Carte des sorties">
         <ClientOnly fallback={<div className="map-canvas bg-secondary grid place-items-center">Chargement de la carte…</div>}>
           <Suspense fallback={<div className="map-canvas bg-secondary" />}>
-            <MapView points={category === 'location' && !mode ? noPoints : (suggested?.points ?? points)} markers={markers} paths={sharedPaths} focus={focus} initialPosition={devicePosition} onCenter={(lat, lng, zoom) => setViewport({ lat, lng, zoom })} onPoint={(lat, lng) => {
-              if (mode === 'draw') { setSuggested(undefined); setPoints(current => [...current, [lat, lng]]); }
+            <MapView points={locating ? (category === 'location' && !mode ? noPoints : points) : (suggested?.points ?? noPoints)} markers={locating ? markers : markers.filter(marker => marker.live)} paths={locating ? sharedPaths : []} focus={focus} initialPosition={devicePosition} onCenter={(lat, lng, zoom) => setViewport({ lat, lng, zoom })} onPoint={(lat, lng) => {
+              if (mode === 'draw') setPoints(current => [...current, [lat, lng]]);
               if (mode === 'mark') { setPin([lat, lng]); setMode(undefined); }
               if (mode === 'route-start' || mode === 'route-end') {
                 if (mode === 'route-start') setRouteStart([lat, lng]);
@@ -198,7 +203,7 @@ export function MapPage() {
             }} />
           </Suspense>
         </ClientOnly>
-        <div className="map-categories">
+        {locating ? <div className="map-categories">
           <select aria-label="Catégorie de lieux" value={category} onChange={event => setCategory(event.target.value)}>
             <option value="all">Tous les lieux</option>
             <option value="location">Localisation seulement</option>
@@ -207,26 +212,28 @@ export function MapPage() {
           {hasPlaces && (!showPlaces || searching || placeError) && <span role="status" className="map-place-status">
             {!showPlaces ? 'Zoome pour afficher les lieux OpenStreetMap.' : placeError ? 'Lieux OpenStreetMap indisponibles.' : 'Chargement des lieux…'}
           </span>}
-        </div>
+        </div> : <div className="map-categories">
+          <Button size="sm" variant="secondary" onClick={() => { setMode(undefined); setRouteOpen(true); }}><Signpost />{suggested ? 'Détails de l’itinéraire' : 'Préparer un itinéraire'}</Button>
+        </div>}
         <div className="map-tools" aria-label="Outils de la carte">
-          {user && !sharing && <div className="map-share-tip" role="status">
+          {locating && user && !sharing && <div className="map-share-tip" role="status">
             <span>Partage ta position pour que tes amis puissent te rejoindre.</span>
             <ArrowRight size={18} aria-hidden="true" />
           </div>}
-          {user && <Button size="icon" aria-pressed={sharing} variant={sharing ? 'default' : 'secondary'} aria-label={sharing ? 'Arrêter le partage de position' : 'Partager ma position'} title={sharing ? 'Arrêter le partage' : 'Partager ma position'} onClick={() => {
+          {locating && user && <Button size="icon" aria-pressed={sharing} variant={sharing ? 'default' : 'secondary'} aria-label={sharing ? 'Arrêter le partage de position' : 'Partager ma position'} title={sharing ? 'Arrêter le partage' : 'Partager ma position'} onClick={() => {
             if (!navigator.geolocation) { toast.error('Position indisponible.'); return; }
             setSharing(!sharing);
           }}><Navigation /></Button>}
           <Button size="icon" variant="secondary" title="Voir les positions" aria-label="Voir les positions" disabled={!markers.some(marker => marker.live)} onClick={() => setFocus(value => value + 1)}><LocateFixed /></Button>
           <Button size="icon" variant={aerial ? 'default' : 'secondary'} title={aerial ? 'Vue plan' : 'Vue satellite'} aria-label={aerial ? 'Afficher le plan' : 'Afficher la vue satellite'} aria-pressed={aerial} onClick={() => setAerial(!aerial)}><Layers /></Button>
-          <Button size="icon" variant="secondary" title="Itinéraire moto" aria-label="Itinéraire moto" onClick={() => { setMode(undefined); setRouteOpen(true); }}><Signpost /></Button>
+          {locating && <>
           <Button size="icon" variant="secondary" title="Importer GPX" asChild><label className="cursor-pointer">
             <Upload /><span className="sr-only">Importer GPX</span>
             <input className="sr-only" type="file" accept=".gpx" onChange={async event => {
               const file = event.currentTarget.files?.[0];
               event.currentTarget.value = '';
               if (!file) return;
-              try { setPoints(readGpx(await file.text())); setSuggested(undefined); setMode(undefined); }
+              try { setPoints(readGpx(await file.text())); setMode(undefined); }
               catch (error) { toast.error(String(error)); }
             }} />
           </label></Button>
@@ -234,13 +241,14 @@ export function MapPage() {
           <Button size="icon" aria-pressed={mode === 'mark'} variant={mode === 'mark' ? 'default' : 'secondary'} title="Ajouter un repère" aria-label="Ajouter un repère" onClick={() => setMode(mode === 'mark' ? undefined : 'mark')}><MapPin /></Button>
           {points.length > 1 && <Button size="icon" variant="secondary" title="Partager le parcours" aria-label="Partager le parcours" onClick={() => void add('route', { points, name: 'Parcours du groupe' })
             .then(() => toast.success('Parcours partagé.')).catch(() => toast.error('Le parcours n’a pas été partagé.'))}><Share2 /></Button>}
+          </>}
         </div>
-        {(mode || sharing || sharedRoutes.length > 0 && category !== 'location') && <div className="map-status">
-          {sharing && <p>Position partagée avec les membres connectés.</p>}
+        {(mode || locating && (sharing || sharedRoutes.length > 0 && category !== 'location')) && <div className="map-status">
+          {locating && sharing && <p>Position partagée avec les membres connectés.</p>}
           {mode && <p>{mode === 'draw' ? 'Touche la carte pour tracer ton parcours.' : mode === 'route-start' ? 'Touche la carte pour choisir le départ.' : mode === 'route-end' ? 'Touche la carte pour choisir la destination.' : 'Touche la carte pour placer le repère.'}</p>}
-          {category !== 'location' && sharedRoutes.length > 0 && <select aria-label="Parcours partagés" value="" onChange={event => {
+          {locating && category !== 'location' && sharedRoutes.length > 0 && <select aria-label="Parcours partagés" value="" onChange={event => {
             const record = sharedRoutes.find(item => item.id === event.target.value);
-            if (record) { setPoints(record.payload['points'] as Point[]); setSuggested(undefined); }
+            if (record) setPoints(record.payload['points'] as Point[]);
           }}>
             <option value="" disabled>Parcours partagés</option>
             {sharedRoutes.map((record, index) => <option key={record.id} value={record.id}>{String(record.payload['name'])} · {index + 1}</option>)}
