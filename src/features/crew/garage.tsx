@@ -1,9 +1,12 @@
-﻿import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { ArrowLeft, Bike, ChevronLeft, ChevronRight, Gauge, Pencil, Timer, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Carousel, CarouselContent, CarouselItem, type CarouselApi } from '@/components/ui/carousel';
 import { Link, useNavigate } from '@tanstack/react-router';
+import { socialCall } from './social';
+import { kilometers } from './tracks';
+import { RidePhoto } from './ride-detail';
 import { jpeg, loadPhoto } from './photo-crop';
 import { VehicleDescription } from './vehicle-description';
 import { AddVehicle } from './add-vehicle';
@@ -65,7 +68,7 @@ function VehicleGallery({ photos, label }: { photos: string[]; label: string }) 
   );
 }
 
-type Details = Vehicle & { description?: string; parts?: string; photos?: string[] };
+type Details = Vehicle & { description?: string; parts?: string; photos?: string[]; discoverable?: boolean };
 
 function VehicleNotes({ vehicle, compact = false }: { vehicle: Details; compact?: boolean }) {
   const description = vehicle.description?.trim();
@@ -88,15 +91,46 @@ function VehicleNotes({ vehicle, compact = false }: { vehicle: Details; compact?
 
 export function GaragePage() {
   const { records, user } = useCrew();
-  const vehicles = records.filter(record => record.kind === 'vehicle');
+  const [view, setView] = useState<'mine' | 'friends'>('mine');
+  const [friendIds, setFriendIds] = useState<string[]>([]);
+  const [friendError, setFriendError] = useState(false);
+  const [comparison, setComparison] = useState('');
+  const userId = user?.id;
+  const myVehicles = records.filter(record => record.kind === 'vehicle' && (!userId || record.author_id === userId));
+  useEffect(() => {
+    if (!userId || view !== 'friends') return;
+    let active = true;
+    setFriendError(false);
+    setFriendIds([]);
+    void socialCall('mybike_friends_list', {}).then(friends => {
+      if (active) setFriendIds(friends.filter(friend => friend.status === 'accepted').map(friend => friend.user_id));
+    }).catch(() => { if (active) setFriendError(true); });
+    return () => { active = false; };
+  }, [userId, view]);
+  const vehicles = view === 'mine' ? myVehicles : records.filter(record =>
+    record.kind === 'vehicle' && record.payload['discoverable'] === true && !!record.author_id && friendIds.includes(record.author_id));
+  const comparisonVehicle = myVehicles.find(record => record.id === comparison);
 
   return (
     <CrewShell tab="Véhicules">
+      {user && <div className="mb-4 flex flex-wrap gap-2" aria-label="Vues du garage">
+        <Button variant={view === 'mine' ? 'default' : 'outline'} aria-pressed={view === 'mine'} onClick={() => setView('mine')}>Mes motos</Button>
+        <Button variant={view === 'friends' ? 'default' : 'outline'} aria-pressed={view === 'friends'} onClick={() => setView('friends')}>Motos de mes amis</Button>
+      </div>}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <p className="text-muted-foreground">{vehicles.length} {vehicles.length === 1 ? 'véhicule' : 'véhicules'} dans le garage</p>
-        <AddVehicle />
+        {view === 'mine' && <AddVehicle />}
       </div>
-      {!vehicles.length && <p className="text-muted-foreground">Ajoute ta première machine pour suivre ses compteurs et son entretien.</p>}
+      {!vehicles.length && <p className="text-muted-foreground">{view === 'mine' ? 'Ajoute ta première machine pour suivre ses compteurs et son entretien.' : friendError ? 'Les motos de tes amis sont indisponibles.' : 'Aucune moto partagée par tes amis.'}</p>}
+      {view === 'friends' && vehicles.length > 0 && myVehicles.length > 0 && <label className="mb-4 grid max-w-xs gap-1 text-sm">Comparer avec ma moto
+        <select value={comparison} onChange={event => setComparison(event.currentTarget.value)}><option value="">Choisir ma moto</option>
+          {myVehicles.map(record => <option key={record.id} value={record.id}>{String(record.payload['name'])}</option>)}
+        </select>
+      </label>}
+      {view === 'friends' && vehicles.length > 0 && comparisonVehicle && <section className="ride-record mb-4">
+        <h2 className="font-semibold">Ma moto · {String(comparisonVehicle.payload['name'])}</h2>
+        <VehicleNotes vehicle={comparisonVehicle.payload as unknown as Details} compact />
+      </section>}
       <div className="vehicle-grid">
         {vehicles.map(record => {
           const vehicle = record.payload as unknown as Details;
@@ -183,7 +217,7 @@ function VehicleDetails({ record }: { record: CrewRecord }) {
         uploaded.push(await upload(await jpeg(canvas), 'jpg', 'vehicles'));
       }
       await update(record.id, {
-        ...record.payload, name, type, cc, hours, km, description, parts, alert, photos: [...kept, ...uploaded],
+        ...record.payload, name, type, cc, hours, km, description, parts, alert, discoverable: form.has('discoverable'), photos: [...kept, ...uploaded],
         maintenance: entry ? [...vehicle.maintenance, entry] : vehicle.maintenance,
       });
       setEditing(false);
@@ -223,6 +257,7 @@ function VehicleDetails({ record }: { record: CrewRecord }) {
       {!editing ? <>
         <VehicleGallery photos={photos.length ? photos : [images[vehicle.image] ?? '']} label={vehicle.name} />
         <VehicleNotes vehicle={vehicle} />
+        <VehicleRideJournal vehicle={record} />
         {editable && <>
           <div className="grid grid-cols-2 gap-2 text-sm">
             <p className="flex items-center gap-2"><Timer size={16} /> {vehicle.hours} h moteur</p>
@@ -248,6 +283,7 @@ function VehicleDetails({ record }: { record: CrewRecord }) {
             <label className="grid gap-1">Cylindrée (cm³)<input name="cc" type="number" min={1} step={1} defaultValue={vehicle.cc || ''} /></label>
           </div>
           <VehicleDescription initial={vehicle.description ?? ''} model={vehicle.name} />
+          <label className="flex items-start gap-2 text-sm"><input name="discoverable" type="checkbox" defaultChecked={vehicle.discoverable === true} /> Afficher cette moto dans le garage de mes amis</label>
           <label className="grid gap-1">Pièces et équipement<textarea name="parts" maxLength={1200} defaultValue={vehicle.parts} placeholder="Ex. Pneus, suspensions, échappement…" /></label>
           <label className="grid gap-1">Ajouter des photos<input className="w-full max-w-full text-sm" type="file" name="photos" multiple accept="image/*,.heic,.heif" /><span className="text-sm text-muted-foreground">Jusqu’à 32 photos dans la fiche.</span></label>
           {photos.length > 0 && <fieldset className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -271,4 +307,23 @@ function VehicleDetails({ record }: { record: CrewRecord }) {
       )}
     </article>
   );
+}
+
+
+function VehicleRideJournal({ vehicle }: { vehicle: CrewRecord }) {
+  const { records } = useCrew();
+  const [open, setOpen] = useState(false);
+  const rides = records.filter(ride => ride.kind === 'ride-track' && ride.author_id === vehicle.author_id && ride.payload['vehicleId'] === vehicle.id).reverse();
+  const rideIds = new Set(rides.map(ride => ride.id));
+  const photos = records.filter(record => record.kind === 'media' && !record.payload['video'] && rideIds.has(String(record.payload['rideId'])));
+  return <details className="ride-record" onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary className="cursor-pointer font-semibold">Journal de la moto · {rides.length} sortie(s) · {kilometers(rides.reduce((sum, ride) => sum + (Number(ride.payload['distance']) || 0), 0))}</summary>
+    {open && <div className="mt-3 grid gap-3">
+      {rides.length ? <ul className="grid gap-2">{rides.map(ride => <li key={ride.id}>
+        <Link className="underline" to="/parcours/$rideId" params={{ rideId: ride.id }}>{String(ride.payload['name'] || 'Parcours')}</Link>
+        {' · '}{kilometers(Number(ride.payload['distance']) || 0)}
+      </li>)}</ul> : <p className="text-sm text-muted-foreground">Choisis cette moto en enregistrant une sortie pour remplir son journal.</p>}
+      {photos.length > 0 && <div className="media-grid">{photos.map(photo => <RidePhoto key={photo.id} photo={photo} />)}</div>}
+    </div>}
+  </details>;
 }

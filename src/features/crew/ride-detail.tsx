@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowLeft, ImagePlus, LocateFixed, MapPin } from 'lucide-react';
+import { ArrowLeft, Download, ImagePlus, LocateFixed, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { downloadRideGpx, downloadRideMap } from './offline-ride';
+import { toast } from 'sonner';
 import { CrewShell } from './shell';
 import { resolveMedia, useCrew } from './context';
 import { DifficultyBadge, RideFavorite, RideStats, TrackMap } from './rides';
@@ -25,6 +27,8 @@ function RideDetail({ ride, photos }: { ride: CrewRecord; photos: CrewRecord[] }
   const segments = useMemo(() => readSegments(payload['segments']), [payload]);
   const stops = useMemo(() => readStops(payload['stops']), [payload]);
   const [following, setFollowing] = useState(false);
+  const [downloadingMap, setDownloadingMap] = useState(false);
+  const title = String(payload['name'] ?? 'Parcours');
   const [position, setPosition] = useState<{ point: TrackPoint; accuracy: number }>();
   const [error, setError] = useState('');
 
@@ -79,6 +83,17 @@ function RideDetail({ ride, photos }: { ride: CrewRecord; photos: CrewRecord[] }
           setFollowing(!following);
         }}><LocateFixed /> {following ? 'Arrêter le suivi' : 'Suivre la trace'}</Button>
       </div>
+      <div className="flex flex-wrap gap-2" aria-label="Téléchargements hors connexion">
+        <Button size="sm" variant="outline" disabled={!segments.length} onClick={() => downloadRideGpx(title, segments, stops)}><Download /> Trace GPX</Button>
+        <Button size="sm" variant="outline" disabled={downloadingMap || !segments.length} onClick={async () => {
+          setDownloadingMap(true);
+          try {
+            const hasRoads = await downloadRideMap(title, segments, stops);
+            if (!hasRoads) toast.info('Carte téléchargée avec la trace. Les routes de la zone étaient indisponibles.');
+          } catch { toast.error('Impossible de télécharger la carte.'); }
+          finally { setDownloadingMap(false); }
+        }}><Download /> {downloadingMap ? 'Préparation…' : 'Carte hors connexion'}</Button>
+      </div>
       <TrackMap segments={segments} stops={stops} photoMarkers={photoMarkers} position={following ? position : undefined} follow={following} />
       {(following || error) && <p role="status" className="text-sm text-muted-foreground">
         {error || (!position ? 'Recherche de ta position…' : distanceToRoute === undefined || !Number.isFinite(distanceToRoute)
@@ -99,7 +114,7 @@ function RideDetail({ ride, photos }: { ride: CrewRecord; photos: CrewRecord[] }
   </>;
 }
 
-function RidePhoto({ photo }: { photo: CrewRecord }) {
+export function RidePhoto({ photo }: { photo: CrewRecord }) {
   const [url, setUrl] = useState('');
   const path = String(photo.payload['preview'] ?? '');
   useEffect(() => {

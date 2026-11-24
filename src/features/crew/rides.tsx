@@ -213,6 +213,9 @@ function RideRecorder() {
   const [terrain, setTerrain] = useState('');
   const [difficultyFilter, setDifficultyFilter] = useState('');
   const [place, setPlace] = useState('');
+  const [vehicleId, setVehicleId] = useState('');
+  const vehicles = records.filter(record => record.kind === 'vehicle' && (user ? record.author_id === user.id : !record.author_id));
+  const vehicle = vehicles.find(record => record.id === vehicleId);
   const canSave = draft.segments.some(segment => segment.length > 1);
   const rides = records.filter(record => record.kind === 'ride-track').slice().reverse();
   const myRides = rides.filter(ride => user ? ride.author_id === user.id : /^[0-9a-f-]{36}$/i.test(ride.id));
@@ -256,7 +259,7 @@ function RideRecorder() {
     if (!title) return;
     setSaving(true);
     try {
-      await add('ride-track', { name: title, description, pilot: name, place: String(form.get('place') ?? '').trim(),
+      await add('ride-track', { name: title, description, pilot: name, ...(vehicle ? { vehicleId: vehicle.id } : {}), place: String(form.get('place') ?? '').trim(),
         difficulty: readDifficulty(form.get('difficulty')) ? Number(form.get('difficulty')) : null,
         terrain: terrains.find(item => item === form.get('terrain')), communityTrail: form.has('communityTrail'), segments: draft.segments, distance: draft.distance, duration: draft.duration, motion: draft.motion, maxSpeed: draft.maxSpeed, stops: draft.stops });
       draft.clear();
@@ -307,6 +310,12 @@ function RideRecorder() {
     </section>}
     <section hidden={tab !== 'mine'} className="ride-record gap-4" style={{ display: tab === 'mine' ? 'grid' : 'none' }}>
       <h2 className="text-xl font-semibold">Enregistrer un parcours</h2>
+      {vehicles.length > 0 && <label className="grid gap-1 text-sm">Moto de la sortie
+        <select value={vehicleId} onChange={event => setVehicleId(event.currentTarget.value)}>
+          <option value="">Aucune moto associée</option>
+          {vehicles.map(item => <option value={item.id} key={item.id}>{String(item.payload['name'] ?? 'Moto')}</option>)}
+        </select>
+      </label>}
       {!dashboard && <TrackMap segments={draft.segments} position={draft.position} stops={draft.stops} pilots={pilots} focusPilots={focusPilots && pilots.length > 0} />}
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <strong>{kilometers(draft.distance)}</strong><span>{duration}</span>
