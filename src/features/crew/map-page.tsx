@@ -163,7 +163,7 @@ export function MapPage() {
     try {
       const visibility = form.get('visibility') === 'public' ? 'public' : 'private';
       await add('ride-track', { name, planned: true, visibility, segments: [suggested.points],
-        distance: suggested.km * 1000, duration: suggested.seconds * 1000, directions: suggested.directions });
+        distance: suggested.km * 1000, duration: suggested.seconds * 1000, directions: suggested.directions, maneuvers: suggested.maneuvers });
       setRouteOpen(false);
       setSavedOpen(true);
       toast.success('Itinéraire enregistré.');
@@ -190,7 +190,7 @@ export function MapPage() {
     setRouteError('');
     try {
       const chunkSize = maxValhallaStops - 1;
-      const combined: SuggestedRide = { points: [], km: 0, seconds: 0, directions: [], snappedStops: [] };
+      const combined: SuggestedRide = { points: [], km: 0, seconds: 0, directions: [], maneuvers: [], snappedStops: [] };
       let departure = start;
       for (let index = 0; index < stops.length; index += chunkSize) {
         const chunk = stops.slice(index, index + chunkSize);
@@ -216,6 +216,8 @@ export function MapPage() {
         if (!last) throw new Error('Route vide');
         const first = part.points[0];
         const duplicate = index > 0 && first?.[0] === departure[0] && first?.[1] === departure[1];
+        const offset = combined.points.length - (duplicate ? 1 : 0);
+        combined.maneuvers.push(...(part.maneuvers ?? []).map(step => ({ ...step, index: step.index + offset })));
         combined.points.push(...(duplicate ? part.points.slice(1) : part.points));
         combined.km += part.km;
         combined.seconds += part.seconds;

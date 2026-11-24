@@ -7,7 +7,8 @@ const profiles = {
 } as const;
 
 export type RoutePreference = keyof typeof profiles;
-export type SuggestedRide = { points: TrackPoint[]; km: number; seconds: number; directions: string[]; snappedStops: TrackPoint[] };
+export type RouteManeuver = { instruction: string; type: number; index: number };
+export type SuggestedRide = { points: TrackPoint[]; km: number; seconds: number; directions: string[]; maneuvers: RouteManeuver[]; snappedStops: TrackPoint[] };
 
 const cache = new Map<string, { expires: number; route: SuggestedRide }>();
 let lastRequest = 0;
@@ -87,7 +88,7 @@ export async function routingResponse(request: Request) {
     if (!response.ok) return reply({ error: 'unavailable' }, 502);
     const result = await response.json() as { trip?: {
       summary?: { length: number; time: number };
-      legs?: { shape: string; maneuvers?: { instruction: string }[] }[];
+      legs?: { shape: string; maneuvers?: { instruction: string; type: number; begin_shape_index: number }[] }[];
     }};
     const summary = result.trip?.summary;
     const legs = result.trip?.legs;
@@ -103,10 +104,19 @@ export async function routingResponse(request: Request) {
       const arrival = shapes.at(-1)?.at(-1);
       if (!arrival || metersBetween(locations[locations.length - 1]!, arrival) > passageTolerance) return reply({ error: 'unreachable-via' }, 404);
     }
+    let pointOffset = 0;
+    const maneuvers = legs.flatMap((leg, legIndex) => {
+      const shape = shapes[legIndex]!;
+      const offset = pointOffset;
+      pointOffset += shape.length - 1;
+      return (leg.maneuvers ?? []).flatMap(step => Number.isInteger(step.begin_shape_index) && shape[step.begin_shape_index]
+        ? [{ instruction: step.instruction, type: step.type, index: offset + step.begin_shape_index }] : []);
+    });
     const route: SuggestedRide = {
       points: shapes.flatMap((shape, index) => index ? shape.slice(1) : shape),
       km: summary.length, seconds: summary.time,
       snappedStops: shapes.flatMap(shape => { const arrival = shape.at(-1); return arrival ? [arrival] : []; }),
+      maneuvers,
       directions: legs.flatMap(leg => (leg.maneuvers ?? []).map(step => step.instruction)),
     };
     if (route.points.length < 2) return reply({ error: 'no-route' }, 404);

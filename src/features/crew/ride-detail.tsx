@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowLeft, Download, ImagePlus, LocateFixed, MapPin } from 'lucide-react';
+import { ArrowLeft, ArrowUp, CornerUpLeft, CornerUpRight, Download, Flag, Gauge, ImagePlus, LocateFixed, MapPin, Maximize, Volume2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { downloadRideGpx, downloadRideMap } from './offline-ride';
 import { toast } from 'sonner';
 import { CrewShell } from './shell';
 import { resolveMedia, useCrew } from './context';
 import { DifficultyBadge, RideFavorite, RideStats, TrackMap } from './rides';
-import { metersFromRoute, readSegments, readStops, type TrackPoint } from './tracks';
+import { createRideSpeed } from './ride-speed';
+import type { RouteManeuver } from './valhalla.server';
+import { metersBetween, routeProgress, readSegments, readStops, type TrackPoint } from './tracks';
 import type { CrewRecord } from './data';
 
 export function RideDetailPage({ rideId, start = false }: { rideId: string; start?: boolean }) {
@@ -27,6 +29,11 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
   const segments = useMemo(() => readSegments(payload['segments']), [payload]);
   const stops = useMemo(() => readStops(payload['stops']), [payload]);
   const [following, setFollowing] = useState(start && segments.length > 0);
+  const [dashboard, setDashboard] = useState(start && segments.length > 0);
+  const [voice, setVoice] = useState(false);
+  const [voiceAvailable, setVoiceAvailable] = useState(false);
+  const [speed, setSpeed] = useState<number>();
+  const lastSpoken = useRef<number | undefined>(undefined);
   const [downloadingMap, setDownloadingMap] = useState(false);
   const title = String(payload['name'] ?? 'Parcours');
   const [position, setPosition] = useState<{ point: TrackPoint; accuracy: number }>();
@@ -36,17 +43,23 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
     if (!following) return;
     if (!navigator.geolocation) { setError('GPS indisponible sur cet appareil.'); setFollowing(false); return; }
     let active = true;
-    const id = navigator.geolocation.watchPosition(({ coords }) => {
+    const estimateSpeed = createRideSpeed();
+    let timeout: number | undefined;
+    const id = navigator.geolocation.watchPosition(({ coords, timestamp }) => {
       if (active) {
-        setPosition({ point: [coords.latitude, coords.longitude], accuracy: coords.accuracy });
+        const point: TrackPoint = [coords.latitude, coords.longitude];
+        setPosition({ point, accuracy: coords.accuracy });
+        window.clearTimeout(timeout);
+        setSpeed(estimateSpeed({ point, timestamp, accuracy: coords.accuracy, reported: coords.speed })?.kmh);
+        timeout = window.setTimeout(() => setSpeed(undefined), 7000);
         setError('');
       }
     }, failure => {
       if (!active) return;
       setError(failure.code === 1 ? 'Autorise la localisation pour suivre la trace.' : 'En attente d’un meilleur signal GPS.');
-      if (failure.code === 1) setFollowing(false);
+      if (failure.code === 1) { setFollowing(false); setDashboard(false); }
     }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 });
-    return () => { active = false; navigator.geolocation.clearWatch(id); };
+    return () => { active = false; window.clearTimeout(timeout); navigator.geolocation.clearWatch(id); };
   }, [following]);
 
   const motion = payload['motion'] as { meters?: unknown; milliseconds?: unknown } | undefined;
@@ -54,7 +67,48 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
   const movingDistance = Number(motion?.meters);
   const motionStats = movingTime > 0 && Number.isFinite(movingTime) && Number.isFinite(movingDistance)
     ? { milliseconds: movingTime, meters: movingDistance } : undefined;
-  const distanceToRoute = position && position.accuracy <= 35 ? metersFromRoute(position.point, segments) : undefined;
+  const progress = position && position.accuracy <= 35 ? routeProgress(position.point, segments) : undefined;
+  const distanceToRoute = progress?.distance;
+  const offRoute = progress !== undefined && progress.distance > 65;
+  const steps = useMemo(() => {
+    const points = segments.length === 1 ? segments[0] : undefined;
+    const instructions: unknown = payload['maneuvers'];
+    if (!points || !Array.isArray(instructions)) return [];
+    let traveled = 0;
+    const distances = points.map((point, index) => {
+      if (index) traveled += metersBetween(points[index - 1]!, point);
+      return traveled;
+    });
+    return instructions.flatMap((step: Partial<RouteManeuver> | null, order) => {
+      if (!step || typeof step.instruction !== 'string' || typeof step.index !== 'number' ||
+          !Number.isInteger(step.index) || distances[step.index] === undefined) return [];
+      return [{ instruction: step.instruction, type: step.type ?? 0, at: distances[step.index]!, order }];
+    });
+  }, [payload, segments]);
+  const nextStep = progress && !offRoute ? steps.find(step => step.at >= Math.max(0, progress.traveled - 8)) : undefined;
+  const turnDistance = nextStep && progress ? Math.max(0, Math.round((nextStep.at - progress.traveled) / 10) * 10) : undefined;
+  const arrived = progress && !offRoute && progress.remaining < 20;
+  const TurnIcon = nextStep && [9, 10, 11, 12, 18, 20, 23].includes(nextStep.type) ? CornerUpRight
+    : nextStep && [13, 14, 15, 16, 19, 21, 24].includes(nextStep.type) ? CornerUpLeft
+      : nextStep && [4, 5, 6].includes(nextStep.type) || arrived ? Flag : ArrowUp;
+
+  useEffect(() => setVoiceAvailable('speechSynthesis' in window), []);
+  useEffect(() => {
+    if (!dashboard) return;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = overflow;
+      if (voice) window.speechSynthesis?.cancel();
+    };
+  }, [dashboard, voice]);
+  useEffect(() => {
+    if (!dashboard || !voice || !nextStep || turnDistance === undefined || turnDistance > 200 || lastSpoken.current === nextStep.order) return;
+    const speech = new SpeechSynthesisUtterance((turnDistance >= 30 ? 'Dans ' + turnDistance + ' mètres. ' : '') + nextStep.instruction);
+    speech.lang = 'fr-FR';
+    lastSpoken.current = nextStep.order;
+    window.speechSynthesis.speak(speech);
+  }, [dashboard, voice, nextStep, turnDistance]);
   const photoMarkers = photos.flatMap(photo => {
     const point = readSegments([[photo.payload['gps']]])[0]?.[0];
     return point ? [{ lat: point[0], lng: point[1], category: 'photo',
@@ -64,6 +118,25 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
   const maxSpeed = typeof payload['maxSpeed'] === 'number' ? payload['maxSpeed'] : undefined;
 
   return <>
+    {dashboard && <section className="ride-dashboard" data-layout="balanced" aria-label="Compteur et guidage" onKeyDown={event => { if (event.key === 'Escape') setDashboard(false); }}>
+      <div className="ride-dashboard-stats">
+        <div className="flex w-full items-center justify-between gap-2">
+          <Button variant="outline" size="icon" autoFocus aria-label="Fermer le compteur" onClick={() => setDashboard(false)}><X /></Button>
+          {voiceAvailable && steps.length > 0 && <Button size="sm" variant={voice ? 'default' : 'outline'} aria-pressed={voice} onClick={() => { lastSpoken.current = undefined; setVoice(!voice); }}><Volume2 /> Voix</Button>}
+        </div>
+        <div className="ride-speed"><Gauge size={24} aria-hidden="true" /><span className="font-display font-bold tabular-nums">{speed === undefined ? '—' : Math.round(speed)}</span><span className="text-sm">km/h</span></div>
+        <div className="grid justify-items-center gap-1 text-center">
+          <TurnIcon size={34} aria-hidden="true" />
+          <strong className={offRoute ? 'text-primary' : ''}>{error || (offRoute ? 'Hors de la trace · ' + Math.round(progress.distance) + ' m'
+            : arrived ? 'Arrivée à proximité' : !position ? 'Recherche de ta position…'
+              : !progress ? 'Signal GPS faible' : nextStep?.instruction || 'Suis la trace sur la carte')}</strong>
+          {nextStep && !arrived && turnDistance !== undefined && <span>{turnDistance > 0 ? 'Dans ' + turnDistance + ' m' : 'Maintenant'}</span>}
+          {progress && <span className="text-sm text-muted-foreground">{(progress.remaining / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km restants sur la trace</span>}
+        </div>
+        <Button size="sm" variant="outline" onClick={() => { setFollowing(false); setDashboard(false); setSpeed(undefined); }}>Arrêter le guidage</Button>
+      </div>
+      <TrackMap segments={segments} stops={stops} photoMarkers={photoMarkers} position={position} follow={following} />
+    </section>}
     <section className="ride-record grid gap-4">
       <header>
         <h2 className="font-display text-4xl font-bold">{String(payload['name'] ?? 'Parcours')}</h2>
@@ -82,6 +155,7 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
           setPosition(undefined);
           setFollowing(!following);
         }}><LocateFixed /> {following ? 'Arrêter le suivi' : 'Suivre la trace'}</Button>
+        <Button disabled={!segments.length} variant="outline" onClick={() => { setFollowing(true); setDashboard(true); setError(''); }}><Maximize /> Compteur et guidage</Button>
       </div>
       <div className="flex flex-wrap gap-2" aria-label="Téléchargements hors connexion">
         <Button size="sm" variant="outline" disabled={!segments.length} onClick={() => downloadRideGpx(title, segments, stops)}><Download /> Trace GPX</Button>
@@ -95,7 +169,7 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
         }}><Download /> {downloadingMap ? 'Préparation…' : 'Carte hors connexion'}</Button>
       </div>
       {Array.isArray(payload['directions']) && <details><summary className="cursor-pointer">Directions de l’itinéraire</summary><ol className="mt-2 list-decimal space-y-1 pl-5">{payload['directions'].filter(step => typeof step === 'string').map((step, index) => <li key={index}>{step}</li>)}</ol></details>}
-      <TrackMap segments={segments} stops={stops} photoMarkers={photoMarkers} position={following ? position : undefined} follow={following} />
+      {!dashboard && <TrackMap segments={segments} stops={stops} photoMarkers={photoMarkers} position={following ? position : undefined} follow={following} />}
       {(following || error) && <p role="status" className="text-sm text-muted-foreground">
         {error || (!position ? 'Recherche de ta position…' : distanceToRoute === undefined || !Number.isFinite(distanceToRoute)
           ? 'Signal GPS trop faible pour estimer l’écart à la trace.'

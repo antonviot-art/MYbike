@@ -43,26 +43,35 @@ export function readStops(value: unknown): TrackStop[] {
   }).slice(0, 80);
 }
 
-export function metersFromRoute(point: TrackPoint, segments: TrackPoint[][]) {
+export function routeProgress(point: TrackPoint, segments: TrackPoint[][]) {
   const scale = Math.PI * 6371000 / 180;
   const xScale = scale * Math.cos(point[0] * radians);
   let nearest = Infinity;
+  let traveled = 0;
+  let total = 0;
   for (const segment of segments) {
     let last: TrackPoint | undefined;
     for (const [lat, lon] of segment) {
       const x = ((lon - point[1] + 540) % 360 - 180) * xScale;
       const y = (lat - point[0]) * scale;
-      nearest = Math.min(nearest, Math.hypot(x, y));
+      if (!last && Math.hypot(x, y) < nearest) { nearest = Math.hypot(x, y); traveled = total; }
       if (last) {
         const dx = x - last[0], dy = y - last[1];
         const squared = dx * dx + dy * dy;
         if (squared) {
           const ratio = Math.min(1, Math.max(0, -(last[0] * dx + last[1] * dy) / squared));
-          nearest = Math.min(nearest, Math.hypot(last[0] + ratio * dx, last[1] + ratio * dy));
+          const length = Math.sqrt(squared);
+          const distance = Math.hypot(last[0] + ratio * dx, last[1] + ratio * dy);
+          if (distance < nearest) { nearest = distance; traveled = total + ratio * length; }
+          total += length;
         }
       }
       last = [x, y];
     }
   }
-  return nearest;
+  return { distance: nearest, traveled, remaining: Math.max(0, total - traveled) };
+}
+
+export function metersFromRoute(point: TrackPoint, segments: TrackPoint[][]) {
+  return routeProgress(point, segments).distance;
 }
