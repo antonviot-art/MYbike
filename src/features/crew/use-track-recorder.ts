@@ -5,7 +5,9 @@ import { createRideSpeed, type SpeedReading } from './ride-speed';
 
 const maxPoints = 12000;
 
-export function useTrackRecorder(key: string) {
+export function useTrackRecorder(key: string, onGoodFix?: (point: TrackPoint, timestamp: number) => void) {
+  const goodFix = useRef(onGoodFix);
+  goodFix.current = onGoodFix;
   const [segments, setSegments] = useState<TrackPoint[][]>([]);
   const [duration, setDuration] = useState(0);
   const [recording, setRecording] = useState(false);
@@ -112,6 +114,7 @@ export function useTrackRecorder(key: string) {
       setSpeedReading(reading);
       if (reading) speedTimeout = window.setTimeout(() => setSpeedReading(undefined), 7000);
       if (coords.accuracy > 35 || !Number.isFinite(coords.accuracy)) return;
+      goodFix.current?.(point, timestamp);
       const gap = timestamp - lastTime > 30000;
       if (lastPoint && !gap) {
         const moved = metersBetween(lastPoint, point);

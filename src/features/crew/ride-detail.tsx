@@ -8,8 +8,9 @@ import { CrewShell } from './shell';
 import { resolveMedia, useCrew } from './context';
 import { DifficultyBadge, RideFavorite, RideStats, TrackMap } from './rides';
 import { createRideSpeed } from './ride-speed';
-import type { RouteManeuver } from './valhalla.server';
+import type { RouteManeuver, SuggestedRide } from './valhalla.server';
 import { metersBetween, routeProgress, readSegments, readStops, type TrackPoint } from './tracks';
+import { LapResults } from './circuit-recorder';
 import type { CrewRecord } from './data';
 
 export function RideDetailPage({ rideId, start = false }: { rideId: string; start?: boolean }) {
@@ -26,7 +27,10 @@ export function RideDetailPage({ rideId, start = false }: { rideId: string; star
 
 function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRecord[]; start: boolean }) {
   const { payload } = ride;
-  const segments = useMemo(() => readSegments(payload['segments']), [payload]);
+  const originalSegments = useMemo(() => readSegments(payload['segments']), [payload]);
+  const [returnRoute, setReturnRoute] = useState<SuggestedRide>();
+  const [returning, setReturning] = useState(false);
+  const segments = useMemo(() => returnRoute ? [returnRoute.points] : originalSegments, [returnRoute, originalSegments]);
   const stops = useMemo(() => readStops(payload['stops']), [payload]);
   const [following, setFollowing] = useState(start && segments.length > 0);
   const [dashboard, setDashboard] = useState(start && segments.length > 0);
@@ -72,7 +76,7 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
   const offRoute = progress !== undefined && progress.distance > 65;
   const steps = useMemo(() => {
     const points = segments.length === 1 ? segments[0] : undefined;
-    const instructions: unknown = payload['maneuvers'];
+    const instructions: unknown = returnRoute?.maneuvers ?? payload['maneuvers'];
     if (!points || !Array.isArray(instructions)) return [];
     let traveled = 0;
     const distances = points.map((point, index) => {
@@ -84,9 +88,13 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
           !Number.isInteger(step.index) || distances[step.index] === undefined) return [];
       return [{ instruction: step.instruction, type: step.type ?? 0, at: distances[step.index]!, order }];
     });
-  }, [payload, segments]);
+  }, [payload, segments, returnRoute]);
   const nextStep = progress && !offRoute ? steps.find(step => step.at >= Math.max(0, progress.traveled - 8)) : undefined;
   const turnDistance = nextStep && progress ? Math.max(0, Math.round((nextStep.at - progress.traveled) / 10) * 10) : undefined;
+  const totalSeconds = returnRoute?.seconds ?? Number(payload['duration']) / 1000;
+  const totalMeters = returnRoute ? returnRoute.km * 1000 : Number(payload['distance']);
+  const arrival = progress && !offRoute && totalMeters > 0 && totalSeconds > 0 && Number.isFinite(totalSeconds)
+    ? new Date(Date.now() + progress.remaining / totalMeters * totalSeconds * 1000).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : undefined;
   const arrived = progress && !offRoute && progress.remaining < 20;
   const TurnIcon = nextStep && [9, 10, 11, 12, 18, 20, 23].includes(nextStep.type) ? CornerUpRight
     : nextStep && [13, 14, 15, 16, 19, 21, 24].includes(nextStep.type) ? CornerUpLeft
@@ -115,6 +123,21 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
       label: String(photo.payload['description'] || 'Voir la photo'),
       url: '/medias?post=' + encodeURIComponent(photo.id) }] : [];
   });
+  async function goBackToStart() {
+    const destination = originalSegments[0]?.[0];
+    if (!position || !destination || returning) return;
+    setReturning(true);
+    try {
+      const response = await fetch('/api/moto-route', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ start: position.point, end: destination, preference: 'road' }),
+      });
+      if (!response.ok) throw new Error();
+      setReturnRoute(await response.json() as SuggestedRide);
+      lastSpoken.current = undefined;
+    } catch { toast.error('Le retour au départ n’a pas pu être calculé.'); }
+    finally { setReturning(false); }
+  }
+
   const maxSpeed = typeof payload['maxSpeed'] === 'number' ? payload['maxSpeed'] : undefined;
 
   return <>
@@ -131,8 +154,12 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
             : arrived ? 'Arrivée à proximité' : !position ? 'Recherche de ta position…'
               : !progress ? 'Signal GPS faible' : nextStep?.instruction || 'Suis la trace sur la carte')}</strong>
           {nextStep && !arrived && turnDistance !== undefined && <span>{turnDistance > 0 ? 'Dans ' + turnDistance + ' m' : 'Maintenant'}</span>}
+          {arrival && <span className="text-sm">Arrivée vers {arrival}</span>}
           {progress && <span className="text-sm text-muted-foreground">{(progress.remaining / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km restants sur la trace</span>}
         </div>
+        <Button size="sm" variant="outline" disabled={returning || !position || position.accuracy > 35} onClick={() => {
+          if (returnRoute) { setReturnRoute(undefined); lastSpoken.current = undefined; } else void goBackToStart();
+        }}>{returning ? 'Calcul du retour…' : returnRoute ? 'Reprendre le trajet initial' : 'Retour au départ'}</Button>
         <Button size="sm" variant="outline" onClick={() => { setFollowing(false); setDashboard(false); setSpeed(undefined); }}>Arrêter le guidage</Button>
       </div>
       <TrackMap segments={segments} stops={stops} photoMarkers={photoMarkers} position={position} follow={following} />
@@ -145,6 +172,7 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
       {Boolean(payload['description']) && <p className="whitespace-pre-wrap break-words">{String(payload['description'])}</p>}
       <div className="flex flex-wrap items-center gap-2"><DifficultyBadge ride={ride} /><RideFavorite rideId={ride.id} /></div>
       <h3 className="text-lg font-semibold">{payload['planned'] === true ? 'Trajet prévu' : 'Bilan de sortie'}</h3>
+      <LapResults value={payload['laps']} />
       <RideStats distance={Number(payload['distance']) || 0} duration={Number(payload['duration']) || 0} motion={motionStats} maxSpeed={maxSpeed} />
     </section>
     <section className="ride-record grid gap-4">

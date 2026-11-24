@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { useCrew } from './context';
 import { CrewShell } from './shell';
 import { kilometers, readSegments, type TrackPoint, type TrackStop } from './tracks';
+import { CircuitRecorder, LapResults } from './circuit-recorder';
 import { useTrackRecorder } from './use-track-recorder';
 import { useInitialPosition, type InitialPosition } from './use-initial-position';
 import { socialCall } from './social';
@@ -177,6 +178,7 @@ function TrackCard({ record, authors }: { record: CrewRecord; authors: boolean }
       {authors && author && <> · <Link className="underline" to="/pilotes/$pilotId" params={{ pilotId: author }}>{String(payload['pilot'] ?? 'Pilote')}</Link></>}
     </p>
     <div className="mt-2"><DifficultyBadge ride={record} /></div>
+    <LapResults value={payload['laps']} />
     {description && <p className="mt-2 whitespace-pre-wrap break-words">{description}</p>}
     <div className="mt-3 flex flex-wrap gap-2">
       <Button asChild size="sm"><Link to="/parcours/$rideId" params={{ rideId: record.id }}><Route /> Refaire ce parcours</Link></Button>
@@ -209,12 +211,13 @@ function RideRecorder() {
   const devicePosition = useInitialPosition();
   const initialPosition = draft.position || draft.segments.length ? undefined : devicePosition;
   const [saving, setSaving] = useState(false);
+  const [circuitActive, setCircuitActive] = useState(false);
   const [discard, setDiscard] = useState(false);
   const [dashboard, setDashboard] = useState(false);
   const [focusPilots, setFocusPilots] = useState(false);
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayout>('balanced');
   const [addingStop, setAddingStop] = useState(false);
-  const [tab, setTab] = useState<'mine' | 'explore' | 'saved'>('mine');
+  const [tab, setTab] = useState<'mine' | 'explore' | 'saved' | 'record' | 'loop'>('mine');
   const [terrain, setTerrain] = useState('');
   const [difficultyFilter, setDifficultyFilter] = useState('');
   const [place, setPlace] = useState('');
@@ -288,8 +291,10 @@ function RideRecorder() {
   const duration = Math.floor(draft.duration / 60000) + ' min ' + (Math.floor(draft.duration / 1000) % 60) + ' s';
 
   return <div className="mx-auto grid max-w-5xl gap-6">
-    <div className="flex flex-wrap gap-2" aria-label="Vues des parcours">
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" aria-label="Vues des parcours">
       <Button variant={tab === 'mine' ? 'default' : 'outline'} aria-pressed={tab === 'mine'} onClick={() => setTab('mine')}>Mes parcours</Button>
+      <Button variant={tab === 'record' ? 'default' : 'outline'} aria-pressed={tab === 'record'} onClick={() => setTab('record')}>Enregistrer</Button>
+      <Button variant={tab === 'loop' ? 'default' : 'outline'} aria-pressed={tab === 'loop'} onClick={() => setTab('loop')}>Créer une boucle</Button>
       <Button variant={tab === 'explore' ? 'default' : 'outline'} aria-pressed={tab === 'explore'} onClick={() => setTab('explore')}>Explorer les parcours</Button>
       <Button variant={tab === 'saved' ? 'default' : 'outline'} aria-pressed={tab === 'saved'} onClick={() => setTab('saved')}><Bookmark /> À rouler</Button>
     </div>
@@ -314,7 +319,7 @@ function RideRecorder() {
       </div>
       <TrackMap segments={draft.segments} position={draft.position} initialPosition={initialPosition} stops={draft.stops} pilots={pilots} focusPilots={focusPilots && pilots.length > 0} />
     </section>}
-    <section hidden={tab !== 'mine'} className="ride-record gap-4" style={{ display: tab === 'mine' ? 'grid' : 'none' }}>
+    <section hidden={tab !== 'record'} className="ride-record gap-4" style={{ display: tab === 'record' ? 'grid' : 'none' }}>
       <h2 className="text-xl font-semibold">Enregistrer un parcours</h2>
       {vehicles.length > 0 && <label className="grid gap-1 text-sm">Moto de la sortie
         <select value={vehicleId} onChange={event => setVehicleId(event.currentTarget.value)}>
@@ -337,7 +342,7 @@ function RideRecorder() {
       <div className="flex flex-wrap gap-2">
         {draft.recording
           ? <Button onClick={draft.stop}><Square /> Arrêter</Button>
-          : <Button onClick={draft.start} disabled={saving}><Circle /> {draft.segments.length ? 'Reprendre' : 'Démarrer'}</Button>}
+          : <Button onClick={draft.start} disabled={saving || circuitActive}><Circle /> {draft.segments.length ? 'Reprendre' : 'Démarrer'}</Button>}
         {draft.recording && <Button variant="outline" onClick={() => setDashboard(true)}><Maximize /> Tableau de bord</Button>}
         {draft.recording && <Button variant="outline" disabled={!draft.position || draft.position.accuracy > 35} onClick={() => setAddingStop(!addingStop)}><MapPin /> Ajouter un repère</Button>}
         {!draft.recording && draft.segments.length > 0 && <Button variant="ghost" disabled={saving} onClick={() => {
@@ -367,6 +372,7 @@ function RideRecorder() {
       </form>}
       {!draft.recording && draft.segments.length > 0 && !canSave && <p className="text-sm text-muted-foreground">Reprends l’enregistrement et avance à l’extérieur pour obtenir une trace partageable.</p>}
     </section>
+    <div hidden={tab !== 'loop' && !circuitActive}><CircuitRecorder blocked={draft.recording} onActive={setCircuitActive} /></div>
     {tab === 'mine' ? <section className="grid gap-3">
       <h2 className="text-xl font-semibold">Mes parcours</h2>
       <TrackList records={myRides} />
@@ -374,7 +380,7 @@ function RideRecorder() {
       <h2 className="text-xl font-semibold">À rouler</h2>
       {rides.some(ride => favoriteRides.includes(ride.id)) ? <TrackList records={rides.filter(ride => favoriteRides.includes(ride.id))} authors />
         : <p className="text-muted-foreground">Ajoute un parcours à tes favoris pour le retrouver ici.</p>}
-    </section> : <section className="grid gap-3">
+    </section> : tab === 'explore' ? <section className="grid gap-3">
       <h2 className="text-xl font-semibold">Parcours de la communauté</h2>
       <div className="flex flex-wrap gap-2">
         <input aria-label="Rechercher un lieu" value={place} onChange={event => setPlace(event.target.value)} placeholder="Lieu ou nom du parcours" />
@@ -384,6 +390,6 @@ function RideRecorder() {
         <select aria-label="Filtrer par difficulté" value={difficultyFilter} onChange={event => setDifficultyFilter(event.target.value)}><DifficultyOptions placeholder="Toutes les difficultés" /></select>
       </div>
       <TrackList records={matching} authors />
-    </section>}
+    </section> : null}
   </div>;
 }

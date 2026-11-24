@@ -25,16 +25,19 @@ const categories = [
 const osmTags = { fuel: 'fuel', charging: 'charging_station', parking: 'parking' } as const;
 type NearbyPlace = { lat: number; lng: number; label: string; color: string; category: string };
 
-export function MapPage() {
+export function MapPage({ loop = false }: { loop?: boolean }) {
   const { records, add, remove, user, sharing, setSharing, positionClock, aerial, setAerial } = useCrew();
-  const [view, setView] = useState<'locate' | 'route'>('locate');
+  const [view, setView] = useState<'locate' | 'route'>(loop ? 'route' : 'locate');
   const locating = view === 'locate';
   const [focus, setFocus] = useState(0);
   const devicePosition = useInitialPosition();
   const [points, setPoints] = useState<Point[]>([]);
   const [mode, setMode] = useState<'draw' | 'mark' | 'route-start' | 'route-end' | 'route-via'>();
   const [pin, setPin] = useState<Point>();
-  const [routeOpen, setRouteOpen] = useState(false);
+  const [routeOpen, setRouteOpen] = useState(loop);
+  const [loopMinutes, setLoopMinutes] = useState(90);
+  const [loopDirection, setLoopDirection] = useState('nord');
+  const generatedLoop = useRef<Point[]>([]);
   const [routeStart, setRouteStart] = useState<Point>();
   const [routeEnd, setRouteEnd] = useState<Point>();
   const [via, setVia] = useState<Point[]>([]);
@@ -179,9 +182,9 @@ export function MapPage() {
     ...(routeEnd ? [routeEnd] : []),
   ];
 
-  async function calculateRoute() {
+  async function calculateRoute(ordered = calculationPoints, automaticLoop = false) {
     if (routeBusy) return;
-    const [start, ...stops] = calculationPoints;
+    const [start, ...stops] = ordered;
     if (!start || !stops.length) {
       setRouteError('Pose une destination et choisis un départ, ou utilise ta position GPS.');
       return;
@@ -196,7 +199,7 @@ export function MapPage() {
         const chunk = stops.slice(index, index + chunkSize);
         const request = {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ start: departure, end: chunk.at(-1), preference, via: chunk.slice(0, -1), strictEnd: index + chunkSize < stops.length }),
+          body: JSON.stringify({ start: departure, end: chunk.at(-1), preference, via: chunk.slice(0, -1), strictEnd: index + chunkSize < stops.length, automaticLoop }),
         };
         let response = await fetch('/api/moto-route', request);
         if (response.status === 429) {
@@ -229,6 +232,26 @@ export function MapPage() {
       setSuggested({ ...combined, viaOffset: preferredStart ? 0 : 1 });
     } catch { setRouteError('Le calcul est indisponible pour le moment.'); }
     finally { setRouteBusy(false); }
+  }
+
+  function proposeLoop() {
+    const start = preferredStart;
+    if (!start) { setRouteError('Choisis un départ ou utilise ta position GPS.'); return; }
+    const bearings: Record<string, number> = { nord: 0, est: 90, sud: 180, ouest: 270 };
+    const radiusKm = loopMinutes / 60 * (preference === 'trails' ? 24 : 38) / 4.5;
+    const pointAt = (delta: number): Point => {
+      const angle = ((bearings[loopDirection] ?? 0) + delta) * Math.PI / 180;
+      const longitudeScale = Math.max(0.1, Math.cos(start[0] * Math.PI / 180));
+      return [start[0] + Math.cos(angle) * radiusKm / 111, start[1] + Math.sin(angle) * radiusKm / (111 * longitudeScale)];
+    };
+    const customPoints = via.filter(point => !generatedLoop.current.includes(point));
+    const automatic = !customPoints.length;
+    const waypoints = automatic ? [pointAt(-50), pointAt(50)] : customPoints;
+    generatedLoop.current = automatic ? waypoints : [];
+    setRouteStart(start);
+    setRouteEnd(start);
+    setVia(waypoints);
+    void calculateRoute([start, ...waypoints, start], automatic);
   }
 
   async function savePin(event: FormEvent<HTMLFormElement>) {
@@ -370,7 +393,13 @@ export function MapPage() {
                 <option value="trails">Chemins privilégiés</option>
               </select>
             </label>
-            <Button disabled={routeBusy} onClick={() => void calculateRoute()}>{routeBusy ? 'Calcul…' : 'Calculer'}</Button>
+            {loop && <div className="grid gap-2 rounded-lg border border-border p-3">
+              <label className="grid gap-1">Durée souhaitée<select value={loopMinutes} onChange={event => setLoopMinutes(Number(event.target.value))}><option value={30}>30 min</option><option value={60}>1 h</option><option value={90}>1 h 30</option><option value={120}>2 h</option></select></label>
+              <label className="grid gap-1">Direction de la boucle<select value={loopDirection} onChange={event => setLoopDirection(event.target.value)}><option value="nord">Nord</option><option value="est">Est</option><option value="sud">Sud</option><option value="ouest">Ouest</option></select></label>
+              <p className="text-xs text-muted-foreground">La durée est indicative. Tu peux poser des passages sur la carte pour personnaliser la boucle.</p>
+              <Button disabled={routeBusy} onClick={proposeLoop}>{routeBusy ? 'Calcul…' : 'Proposer une boucle'}</Button>
+            </div>}
+            {!loop && <Button disabled={routeBusy} onClick={() => void calculateRoute()}>{routeBusy ? 'Calcul…' : 'Calculer'}</Button>}
             {routeError && <p role="alert">{routeError}</p>}
             {suggested && <>
               <p className="font-semibold">{suggested.km.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km · {Math.max(1, Math.round(suggested.seconds / 60))} min</p>

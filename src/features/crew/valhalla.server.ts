@@ -50,7 +50,7 @@ export async function routingResponse(request: Request) {
   if (origin !== 'https://mybikee.onrender.com' && origin !== new URL(request.url).origin) return reply({ error: 'origin' }, 403);
   if (!request.headers.get('content-type')?.startsWith('application/json')) return reply({ error: 'input' }, 400);
 
-  let input: { start?: unknown; end?: unknown; preference?: unknown; via?: unknown; strictEnd?: unknown };
+  let input: { start?: unknown; end?: unknown; preference?: unknown; via?: unknown; strictEnd?: unknown; automaticLoop?: unknown };
   try {
     const body = await request.text();
     if (body.length > 4096) return reply({ error: 'input' }, 400);
@@ -62,11 +62,12 @@ export async function routingResponse(request: Request) {
   const [locations] = readSegments([[input.start, ...via, input.end]]);
   const preference = input.preference as RoutePreference;
   if (!locations || !Object.hasOwn(profiles, preference)) return reply({ error: 'input' }, 400);
-  const key = JSON.stringify([preference, input.strictEnd === true, locations.map(point => point.map(value => Number(value.toFixed(5))))]);
+  const wideLoop = input.automaticLoop === true && via.length === 2 && locations[0]![0] === locations.at(-1)![0] && locations[0]![1] === locations.at(-1)![1];
+  const key = JSON.stringify([preference, wideLoop, input.strictEnd === true, locations.map(point => point.map(value => Number(value.toFixed(5))))]);
   const entry = cache.get(key);
   if (entry && entry.expires > Date.now()) return reply(entry.route);
   if (running || Date.now() - lastRequest < 1200) return reply({ error: 'busy' }, 429);
-  const passageTolerance = 250;
+  const passageTolerance = wideLoop ? 4000 : 250;
   lastRequest = Date.now();
   running = true;
 
