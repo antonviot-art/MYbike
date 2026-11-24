@@ -38,7 +38,7 @@ export function MapPage() {
   const [deletePin, setDeletePin] = useState<{ id: string; label: string }>();
   const [placeError, setPlaceError] = useState(false);
   const hasPlaces = category === 'all' || Object.hasOwn(osmTags, category);
-  const radius = Math.min(18000, Math.round(6000 * 2 ** (12 - viewport.zoom)));
+  const radius = viewport.zoom < 12 ? 18000 : viewport.zoom < 15 ? 6000 : 1250;
   const step = radius / 240000;
   const lat = (Math.round(viewport.lat / step) * step).toFixed(5);
   const lng = (Math.round(viewport.lng / step) * step).toFixed(5);
@@ -63,6 +63,9 @@ export function MapPage() {
       .map(marker => ({ ...marker, current: true, label: 'Ta position' })) : []),
     ...(showPlaces ? nearby : []).filter(place => category === 'all' || place.category === category).map(place => ({ ...place, live: false })),
   ];
+  const sharedPaths = category === 'all' ? records.filter(record => record.kind === 'ride-track' && record.payload['communityTrail'] === true).map(record => ({
+    label: 'Chemin partagé par ' + String(record.payload['pilot'] || 'un pilote'), segments: readSegments(record.payload['segments']),
+  })).filter(path => path.segments.length) : [];
   const sharedRoutes = records.filter(record => record.kind === 'route');
 
   useEffect(() => {
@@ -71,7 +74,7 @@ export function MapPage() {
     const key = [category, lat, lng, radius].join(':');
     const cached = nearbyCache.current.get(key);
     const valid = cached && cached.expires > Date.now();
-    setNearby(showPlaces && valid ? cached.places : []);
+    if (showPlaces && valid) setNearby(cached.places);
     if (!showPlaces || valid) return;
     const request = new AbortController();
     let active = true;
@@ -140,7 +143,7 @@ export function MapPage() {
       <section className="map-screen" aria-label="Carte des sorties">
         <ClientOnly fallback={<div className="map-canvas bg-secondary grid place-items-center">Chargement de la carte…</div>}>
           <Suspense fallback={<div className="map-canvas bg-secondary" />}>
-            <MapView points={category === 'location' && !mode ? noPoints : points} markers={markers} focus={focus} onCenter={(lat, lng, zoom) => setViewport({ lat, lng, zoom })} onPoint={(lat, lng) => {
+            <MapView points={category === 'location' && !mode ? noPoints : points} markers={markers} paths={sharedPaths} focus={focus} onCenter={(lat, lng, zoom) => setViewport({ lat, lng, zoom })} onPoint={(lat, lng) => {
               if (mode === 'draw') setPoints(current => [...current, [lat, lng]]);
               if (mode === 'mark') { setPin([lat, lng]); setMode(undefined); }
             }} />

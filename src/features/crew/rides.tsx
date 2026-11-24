@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ClientOnly, Link } from '@tanstack/react-router';
 import { Circle, Gauge, MapPin, Maximize, Route, Share2, Square, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -16,12 +16,16 @@ const ignoreMapClick = () => {};
 const noPoints: TrackPoint[] = [];
 type Position = { point: TrackPoint; accuracy: number };
 type DashboardLayout = 'map' | 'balanced' | 'speed';
+const terrains = ['Route', 'Cross', 'Enduro'] as const;
 const dashboardLayoutKey = 'mybike:dashboard-layout';
 
-export function TrackMap({ segments, position, stops = [], follow = false, pilots = [], focusPilots = false }: {
+export function TrackMap({ segments, position, stops = [], follow = false, pilots = [], focusPilots = false, photoMarkers = [], onPoint = ignoreMapClick }: {
   segments: TrackPoint[][]; position?: Position | undefined; stops?: TrackStop[]; follow?: boolean; pilots?: ReturnType<typeof livePilots>; focusPilots?: boolean;
+  onPoint?: (lat: number, lng: number) => void;
+  photoMarkers?: { lat: number; lng: number; label: string; category: string; url?: string }[];
 }) {
   const markers = [
+    ...photoMarkers,
     ...stops.map(stop => ({ lat: stop.point[0], lng: stop.point[1], label: stop.label })),
     ...pilots.map(pilot => ({ ...pilot, showName: true })),
     ...(position ? [{ lat: position.point[0], lng: position.point[1], accuracy: position.accuracy, label: 'Ta position GPS', current: true, live: true }] : []),
@@ -29,7 +33,7 @@ export function TrackMap({ segments, position, stops = [], follow = false, pilot
   return <ClientOnly fallback={<div className="track-map map-canvas bg-secondary grid place-items-center">Chargement de la carte…</div>}>
     <Suspense fallback={<div className="track-map map-canvas bg-secondary" />}>
       <div className="track-map"><MapView points={noPoints} segments={segments} markers={markers} follow={follow}
-        focus={position ? 1 : focusPilots && pilots.length ? 2 : 0} focusGroup={focusPilots} onPoint={ignoreMapClick} /></div>
+        focus={position ? 1 : focusPilots && pilots.length ? 2 : 0} focusGroup={focusPilots} onPoint={onPoint} /></div>
     </Suspense>
   </ClientOnly>;
 }
@@ -45,6 +49,7 @@ function TrackCard({ record, authors }: { record: CrewRecord; authors: boolean }
   const [mode, setMode] = useState<'edit' | 'delete'>();
   const [busy, setBusy] = useState(false);
   const detail = useRef<HTMLDetailsElement>(null);
+  const segments = useMemo(() => readSegments(record.payload['segments']), [record.payload]);
   const { payload, author_id: author } = record;
   const title = String(payload['name'] ?? 'Parcours');
   const description = String(payload['description'] ?? '');
@@ -100,7 +105,7 @@ function TrackCard({ record, authors }: { record: CrewRecord; authors: boolean }
   return <article className="ride-record" id={anchor}>
     <details ref={detail} onToggle={event => setOpen(event.currentTarget.open)}>
       <summary className="cursor-pointer font-semibold"><Route className="mr-2 inline text-primary" size={18} />{title}</summary>
-      {open && <div className="mt-3"><TrackMap segments={readSegments(payload['segments'])} /></div>}
+      {open && <div className="mt-3"><TrackMap segments={segments} /></div>}
     </details>
     <p className="mt-2 text-sm text-muted-foreground">{kilometers(Number(payload['distance']) || 0)} · {Math.round((Number(payload['duration']) || 0) / 60000)} min
       {authors && author && <> · <Link className="underline" to="/pilotes/$pilotId" params={{ pilotId: author }}>{String(payload['pilot'] ?? 'Pilote')}</Link></>}
@@ -138,8 +143,16 @@ function RideRecorder() {
   const [focusPilots, setFocusPilots] = useState(false);
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayout>('balanced');
   const [addingStop, setAddingStop] = useState(false);
+  const [tab, setTab] = useState<'mine' | 'explore'>('mine');
+  const [terrain, setTerrain] = useState('');
+  const [place, setPlace] = useState('');
   const canSave = draft.segments.some(segment => segment.length > 1);
   const rides = records.filter(record => record.kind === 'ride-track').slice().reverse();
+  const myRides = rides.filter(ride => user ? ride.author_id === user.id : /^[0-9a-f-]{36}$/i.test(ride.id));
+  const query = place.trim().toLocaleLowerCase('fr');
+  const matching = rides.filter(ride => (!terrain || ride.payload['terrain'] === terrain)
+    && (!query || [ride.payload['place'], ride.payload['name'], ride.payload['description']].some(value =>
+      String(value ?? '').toLocaleLowerCase('fr').includes(query))));
   const pilots = user && draft.recording ? livePilots(records, positionClock, user.id) : [];
   const pilotCount = pilots.length === 1 ? '1 pilote en direct' : pilots.length + ' pilotes en direct';
   const pilotFocusButton = pilots.length > 0 && <Button variant="outline" size="sm" aria-pressed={focusPilots} onClick={() => setFocusPilots(!focusPilots)}>
@@ -175,7 +188,8 @@ function RideRecorder() {
     if (!title) return;
     setSaving(true);
     try {
-      await add('ride-track', { name: title, description, pilot: name, segments: draft.segments, distance: draft.distance, duration: draft.duration, motion: draft.motion, stops: draft.stops });
+      await add('ride-track', { name: title, description, pilot: name, place: String(form.get('place') ?? '').trim(),
+        terrain: terrains.find(item => item === form.get('terrain')), communityTrail: form.has('communityTrail'), segments: draft.segments, distance: draft.distance, duration: draft.duration, motion: draft.motion, stops: draft.stops });
       draft.clear();
       target.reset();
       toast.success(user ? 'Parcours partagé sur ton profil.' : 'Parcours ajouté à cette démo.');
@@ -187,7 +201,8 @@ function RideRecorder() {
   const dial = <div>
     <div className="ride-speed" aria-label="Vitesse GPS actuelle">
       <Gauge size={24} aria-hidden="true" />
-      <span className="font-display font-bold tabular-nums">{draft.speed === undefined ? '—' : Math.round(draft.speed)}</span>
+      <span className="font-display font-bold tabular-nums">{String(draft.speed === undefined ? '—' : Math.round(draft.speed)).split('').map((digit, index, digits) =>
+        <span className="ride-speed-digit" key={digits.length - index}><span key={digit}>{digit}</span></span>)}</span>
       <span className="text-sm text-muted-foreground">km/h</span>
     </div>
     <p className="px-2 text-sm text-muted-foreground">{draft.speedSource === 'gps' ? 'Mesurée par le GPS' : draft.speedSource === 'estimate' ? 'Estimée sur plusieurs positions' : 'Vitesse GPS indisponible'}</p>
@@ -195,6 +210,10 @@ function RideRecorder() {
   const duration = Math.floor(draft.duration / 60000) + ' min ' + (Math.floor(draft.duration / 1000) % 60) + ' s';
 
   return <div className="mx-auto grid max-w-5xl gap-6">
+    <div className="flex flex-wrap gap-2" aria-label="Vues des parcours">
+      <Button variant={tab === 'mine' ? 'default' : 'outline'} aria-pressed={tab === 'mine'} onClick={() => setTab('mine')}>Mes parcours</Button>
+      <Button variant={tab === 'explore' ? 'default' : 'outline'} aria-pressed={tab === 'explore'} onClick={() => setTab('explore')}>Explorer les parcours</Button>
+    </div>
     {dashboard && <section className="ride-dashboard" data-layout={dashboardLayout} aria-label="Tableau de bord du parcours" onKeyDown={event => { if (event.key === 'Escape') setDashboard(false); }}>
       <div className="ride-dashboard-stats">
         <div className="flex w-full flex-wrap items-center justify-between gap-2">
@@ -216,7 +235,7 @@ function RideRecorder() {
       </div>
       <TrackMap segments={draft.segments} position={draft.position} stops={draft.stops} pilots={pilots} focusPilots={focusPilots && pilots.length > 0} />
     </section>}
-    <section className="ride-record grid gap-4">
+    <section hidden={tab !== 'mine'} className="ride-record gap-4" style={{ display: tab === 'mine' ? 'grid' : 'none' }}>
       <h2 className="text-xl font-semibold">Enregistrer un parcours</h2>
       {!dashboard && <TrackMap segments={draft.segments} position={draft.position} stops={draft.stops} pilots={pilots} focusPilots={focusPilots && pilots.length > 0} />}
       <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -258,13 +277,25 @@ function RideRecorder() {
       {!draft.recording && canSave && <form onSubmit={publish} className="grid gap-2">
         <input name="title" aria-label="Nom du parcours" placeholder="Nom du parcours" required maxLength={80} />
         <textarea name="description" aria-label="Description du parcours" placeholder="Description (facultative)" maxLength={600} />
+        <label className="grid gap-1">Lieu<input name="place" placeholder="Commune, département ou région" maxLength={100} /></label>
+        <label className="grid gap-1">Terrain<select name="terrain"><option value="">Choisir un terrain</option>{terrains.map(item => <option key={item}>{item}</option>)}</select></label>
+        <label className="flex items-start gap-2 text-sm"><input type="checkbox" name="communityTrail" /> Afficher cette trace en bleu sur la carte communautaire si elle correspond à un chemin praticable absent du fond de carte.</label>
         <Button disabled={saving} className="justify-self-start"><Share2 />{saving ? 'Partage…' : user ? 'Partager le parcours' : 'Partager dans la démo'}</Button>
       </form>}
       {!draft.recording && draft.segments.length > 0 && !canSave && <p className="text-sm text-muted-foreground">Reprends l’enregistrement et avance à l’extérieur pour obtenir une trace partageable.</p>}
     </section>
-    <section className="grid gap-3">
-      <h2 className="text-xl font-semibold">Parcours partagés</h2>
-      <TrackList records={rides} authors />
-    </section>
+    {tab === 'mine' ? <section className="grid gap-3">
+      <h2 className="text-xl font-semibold">Mes parcours</h2>
+      <TrackList records={myRides} />
+    </section> : <section className="grid gap-3">
+      <h2 className="text-xl font-semibold">Parcours de la communauté</h2>
+      <div className="flex flex-wrap gap-2">
+        <input aria-label="Rechercher un lieu" value={place} onChange={event => setPlace(event.target.value)} placeholder="Lieu ou nom du parcours" />
+        <select aria-label="Filtrer par terrain" value={terrain} onChange={event => setTerrain(event.target.value)}>
+          <option value="">Tous les terrains</option>{terrains.map(item => <option key={item}>{item}</option>)}
+        </select>
+      </div>
+      <TrackList records={matching} authors />
+    </section>}
   </div>;
 }

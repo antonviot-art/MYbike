@@ -4,18 +4,19 @@ import 'leaflet/dist/leaflet.css';
 import { useCrew } from './context';
 
 const pinIcons = {
-  rasso: '⚑', event: '▦', fuel: '⛽', charging: 'ϟ', parking: 'P', other: '📍',
+  rasso: '⚑', event: '▦', fuel: '⛽', charging: 'ϟ', parking: 'P', photo: '📷', other: '📍',
 };
 
 type Marker = { lat: number; lng: number; label: string; live?: boolean; current?: boolean; accuracy?: number; showName?: boolean; url?: string; color?: string; category?: string; onRemove?: (() => void) | undefined };
 
-export default function MapView({ points, segments, markers, focus, focusGroup = false, follow = false, onPoint, onCenter }: {
+export default function MapView({ points, segments, markers, focus, focusGroup = false, follow = false, paths, onPoint, onCenter }: {
   points: [number, number][];
   segments?: [number, number][][];
   markers: Marker[];
   focus: number;
   focusGroup?: boolean;
   follow?: boolean;
+  paths?: { segments: [number, number][][]; label: string }[];
   onPoint: (lat: number, lng: number) => void;
   onCenter?: (lat: number, lng: number, zoom: number) => void;
 }) {
@@ -27,6 +28,7 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
   callback.current = onPoint;
   const centerCallback = useRef(onCenter);
   centerCallback.current = onCenter;
+  const fittedSegments = useRef(false);
   const currentMarkers = useRef(markers);
   currentMarkers.current = markers;
   const followed = follow ? markers.find(marker => marker.current) : undefined;
@@ -76,7 +78,7 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
     for (const marker of markers) {
       if (!Number.isFinite(marker.lat) || !Number.isFinite(marker.lng)) continue;
       const label = marker.url ? document.createElement('a') : document.createElement('span');
-      if (label instanceof HTMLAnchorElement && marker.url?.startsWith('/rasso?')) label.href = marker.url;
+      if (label instanceof HTMLAnchorElement && marker.url && (marker.url.startsWith('/rasso?') || marker.url.startsWith('/medias?post='))) label.href = marker.url;
       label.textContent = marker.label;
       if (marker.current) {
         const center: L.LatLngTuple = [marker.lat, marker.lng];
@@ -111,14 +113,21 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
       const dot = L.circleMarker([marker.lat, marker.lng], options).bindPopup(label).addTo(group);
       if (marker.showName) dot.bindTooltip(label.cloneNode(true) as HTMLElement, { direction: 'top', offset: [0, -8], permanent: true });
     }
+    for (const path of paths ?? []) {
+      const label = document.createElement('span');
+      label.textContent = path.label;
+      L.polyline(path.segments, { color: '#2563eb', weight: 4 }).bindPopup(label).addTo(group);
+    }
     if (segments?.length) L.polyline(segments, { color, weight: 4 }).addTo(group);
     else if (points.length > 1) L.polyline(points, { color, weight: 4 }).addTo(group);
-  }, [points, segments, markers]);
+  }, [points, segments, markers, paths]);
 
   useEffect(() => {
-    if (focusGroup) return;
+    if (focusGroup || follow || (segments && fittedSegments.current)) return;
     const positions = segments?.flat() ?? points;
-    if (positions.length) map.current?.fitBounds(L.latLngBounds(positions), { padding: [30, 30], maxZoom: 16 });
+    if (!positions.length) { fittedSegments.current = false; return; }
+    if (segments) fittedSegments.current = true;
+    map.current?.fitBounds(L.latLngBounds(positions), { padding: [30, 30], maxZoom: 16 });
   }, [points, segments, follow, focusGroup]);
 
   useEffect(() => {

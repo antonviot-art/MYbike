@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { ArrowLeft, ImagePlus, LocateFixed, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -50,6 +50,12 @@ function RideDetail({ ride, photos }: { ride: CrewRecord; photos: CrewRecord[] }
   const movingDistance = Number(motion?.meters);
   const average = movingTime > 0 && Number.isFinite(movingDistance) ? movingDistance * 3600 / movingTime : undefined;
   const distanceToRoute = position && position.accuracy <= 35 ? metersFromRoute(position.point, segments) : undefined;
+  const photoMarkers = photos.flatMap(photo => {
+    const point = readSegments([[photo.payload['gps']]])[0]?.[0];
+    return point ? [{ lat: point[0], lng: point[1], category: 'photo',
+      label: String(photo.payload['description'] || 'Voir la photo'),
+      url: '/medias?post=' + encodeURIComponent(photo.id) }] : [];
+  });
   const duration = Math.round((Number(payload['duration']) || 0) / 60000);
 
   return <>
@@ -75,7 +81,7 @@ function RideDetail({ ride, photos }: { ride: CrewRecord; photos: CrewRecord[] }
           setFollowing(!following);
         }}><LocateFixed /> {following ? 'Arrêter le suivi' : 'Suivre la trace'}</Button>
       </div>
-      <TrackMap segments={segments} stops={stops} position={following ? position : undefined} follow={following} />
+      <TrackMap segments={segments} stops={stops} photoMarkers={photoMarkers} position={following ? position : undefined} follow={following} />
       {(following || error) && <p role="status" className="text-sm text-muted-foreground">
         {error || (!position ? 'Recherche de ta position…' : distanceToRoute === undefined || !Number.isFinite(distanceToRoute)
           ? 'Signal GPS trop faible pour estimer l’écart à la trace.'

@@ -1,5 +1,5 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { Download, Heart, Images, MapPin, MessageCircle, Play, Plus, Share2, Upload } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { Download, Heart, Images, MapPin, MessageCircle, MoreHorizontal, Plus, Share2, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Avatar, CrewShell } from './shell';
@@ -10,7 +10,8 @@ import { toast } from 'sonner';
 import { socialCall } from './social';
 import { jpeg, loadPhoto } from './photo-crop';
 import { photoGps } from './photo-gps';
-import type { TrackPoint } from './tracks';
+import { readSegments, type TrackPoint } from './tracks';
+import { TrackMap } from './rides';
 
 type MediaItem = {
   id: string;
@@ -28,6 +29,7 @@ type MediaItem = {
   authorName?: string;
   link?: string | undefined;
   storyUntil?: number;
+  music?: string | undefined;
 };
 
 const demo = [
@@ -70,11 +72,17 @@ function MediaGallery({ initialRide, initialPost }: { initialRide: string | unde
   const [files, setFiles] = useState<File[]>([]);
   const [now, setNow] = useState(Date.now);
   const [openedLink, setOpenedLink] = useState(false);
+  const [rideId, setRideId] = useState(initialRide ?? '');
+  const [photoPoint, setPhotoPoint] = useState<TrackPoint>();
+  const [choosingPoint, setChoosingPoint] = useState(false);
   const rides = records.filter(record => record.kind === 'ride-track').slice().reverse();
+
+  const rideSegments = rides.find(ride => ride.id === rideId)?.payload['segments'];
+  const photoRoute = useMemo(() => readSegments(rideSegments), [rideSegments]);
 
   useEffect(() => {
     let active = true;
-    const media = records.filter(record => record.kind === 'media');
+    const media = records.filter(record => record.kind === 'media' && (!record.payload['storyUntil'] || Number(record.payload['storyUntil']) > Date.now()));
     void Promise.allSettled(media.map(async ({ id, payload, author_id }): Promise<MediaItem> => ({
       id, url: await resolveMedia(String(payload['preview'])), original: String(payload['original']),
       title: String(payload['title']), date: String(payload['date']), session: String(payload['session']),
@@ -82,6 +90,7 @@ function MediaGallery({ initialRide, initialPost }: { initialRide: string | unde
       description: String(payload['description'] ?? ''), place: String(payload['place'] ?? ''), gps: coordinates(payload['gps']),
       author: author_id, authorName: String(payload['authorName'] || 'Pilote'),
       link: webLink(payload['link']), storyUntil: Number(payload['storyUntil']) || 0,
+      music: typeof payload['music'] === 'string' ? payload['music'] : undefined,
     }))).then(results => {
       if (active) setExtra(results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []));
     });
@@ -128,10 +137,16 @@ function MediaGallery({ initialRide, initialPost }: { initialRide: string | unde
       if (files.some(file => file.size > 50 * 1024 * 1024)) throw new Error('Un fichier dépasse 50 Mo.');
       if (user && visibility === 'friends') await socialCall('mybike_friends_list', {});
       const folder = visibility === 'friends' ? 'friends' : undefined;
+      const track = fields.get('music');
+      let music: string | undefined;
+      if (story && track instanceof File && track.size) {
+        if (!track.type.startsWith('audio/') || track.size > 15 * 1024 * 1024) throw new Error('Choisis un fichier audio de 15 Mo maximum.');
+        music = await upload(track, track.name.split('.').at(-1)?.match(/^[a-z\d]{1,8}$/i)?.[0] ?? 'mp3', folder);
+      }
       for (const file of files) {
         const video = file.type.startsWith('video/');
         const extension = file.name.split('.').at(-1)?.match(/^[a-z\d]{1,8}$/i)?.[0] ?? (video ? 'mp4' : 'jpg');
-        const gps = includeGps && !video ? await photoGps(file) : undefined;
+        const gps = !video ? (ride && photoPoint ? photoPoint : includeGps ? await photoGps(file) : undefined) : undefined;
         let previewBlob: Blob | undefined;
         if (!video) {
           const image = await loadPhoto(file);
@@ -145,18 +160,20 @@ function MediaGallery({ initialRide, initialPost }: { initialRide: string | unde
             previewBlob = await jpeg(canvas, 0.8);
           }
         }
-        const original = await upload(file, extension, folder);
-        const preview = previewBlob ? await upload(previewBlob, 'jpg', folder) : original;
+        const [original, thumbnail] = await Promise.all([upload(file, extension, folder), previewBlob ? upload(previewBlob, 'jpg', folder) : undefined]);
+        const preview = thumbnail ?? original;
         await add('media', {
           original, preview, title: file.name, date: new Date().toISOString().slice(0, 10),
           session: ride ? String(ride.payload['name'] ?? 'Parcours') : 'Nouvelle sortie',
           video, visibility, description, place, authorName: name, ...(gps ? { gps } : {}),
           ...(ride ? { rideId: ride.id } : {}), ...(link ? { link } : {}),
-          ...(story ? { storyUntil: Date.now() + 86400000 } : {}),
+          ...(story ? { storyUntil: Date.now() + 86400000, ...(music ? { music } : {}) } : {}),
         });
         setFiles(pending => pending.filter(item => item !== file));
       }
       setPublishing(undefined);
+      setPhotoPoint(undefined);
+      setChoosingPoint(false);
       toast.success(story ? 'Story publiée pour 24 heures.' : 'Publication ajoutée.');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Impossible de publier les médias.');
@@ -208,9 +225,9 @@ function MediaGallery({ initialRide, initialPost }: { initialRide: string | unde
         {item.author ? <Link to="/pilotes/$pilotId" params={{ pilotId: item.author }} className="font-semibold hover:underline">{item.authorName}</Link>
           : <span className="font-semibold">{item.authorName || 'MYbike · Démo'}</span>}
       </div>
-      <Button variant="ghost" className="relative h-auto w-full overflow-hidden p-0" onClick={() => setSelected(item)} aria-label={'Voir ' + item.title}>
-        {item.video ? <><video className="media-photo" src={item.url} /><Play className="absolute" /></> : <img src={item.url} alt={item.title} className="media-photo" />}
-      </Button>
+      {item.video ? <FeedVideo url={item.url} /> : <Button variant="ghost" className="relative h-auto w-full overflow-hidden p-0" onClick={() => setSelected(item)} aria-label={'Voir ' + item.title}>
+        <img src={item.url} alt={item.title} className="media-photo" loading="lazy" />
+      </Button>}
       <h3 className="mt-2 break-words text-sm font-semibold">{item.title}</h3>
       <p className="text-xs text-muted-foreground">{item.visibility === 'friends' && 'Amis seulement · '}{item.place || item.session} · {new Date(item.date).toLocaleDateString('fr-FR')}</p>
       {item.description && <p className="mt-1 line-clamp-2 text-sm">{item.description}</p>}
@@ -226,15 +243,27 @@ function MediaGallery({ initialRide, initialPost }: { initialRide: string | unde
           <label className="grid gap-1">Photos ou vidéos<input type="file" className="w-full" accept="image/*,video/*,.heic,.heif" multiple disabled={busy}
             onChange={event => setFiles(Array.from(event.target.files ?? []))} /></label>
           {files.length > 0 && <p className="text-sm text-muted-foreground">{files.length} fichier(s) à publier</p>}
+          {publishing === 'story' && <label className="grid gap-1">Musique (facultative)<input name="music" type="file" accept="audio/*" /></label>}
           <label className="grid gap-1">Description<textarea name="description" rows={3} maxLength={600} /></label>
           <label className="grid gap-1">Lien (facultatif)<input name="link" type="url" maxLength={500} placeholder="https://…" /></label>
           <label className="grid gap-1">Lieu (facultatif)<input name="place" maxLength={120} placeholder="Ex. Forêt de Clairvaux" /></label>
           {publishing !== 'story' && rides.length > 0 && <label className="grid gap-1">Associer à un parcours
-            <select name="ride" defaultValue={initialRide ?? ''}><option value="">Aucun parcours</option>
+            <select name="ride" value={rideId} onChange={event => { setRideId(event.target.value); setPhotoPoint(undefined); }}><option value="">Aucun parcours</option>
               {rides.map(ride => <option key={ride.id} value={ride.id}>{String(ride.payload['name'] ?? 'Parcours')}</option>)}
             </select>
           </label>}
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="gps" /> Afficher les coordonnées GPS des photos JPEG qui en contiennent</label>
+          {publishing === 'post' && rideId && photoRoute.length > 0 && <div className="grid gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={() => setChoosingPoint(!choosingPoint)}>
+              <MapPin /> {choosingPoint ? 'Masquer la carte' : 'Placer les photos sur la carte'}
+            </Button>
+            {choosingPoint && <>
+              <p className="text-sm text-muted-foreground">Touche le lieu de prise de vue. Le repère s’applique à toutes les photos sélectionnées.</p>
+              <TrackMap key={rideId} segments={photoRoute} onPoint={(lat, lng) => setPhotoPoint([lat, lng])}
+                photoMarkers={photoPoint ? [{ lat: photoPoint[0], lng: photoPoint[1], label: 'Lieu des photos', category: 'photo' }] : []} />
+            </>}
+            {photoPoint && <Button type="button" variant="ghost" size="sm" onClick={() => setPhotoPoint(undefined)}>Retirer le repère des photos</Button>}
+          </div>}
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="gps" defaultChecked={Boolean(initialRide)} /> Afficher les coordonnées GPS des photos JPEG qui en contiennent</label>
           {user && <label className="grid gap-1">Visibilité<select value={visibility} onChange={event => setVisibility(event.target.value)} disabled={busy}>
             <option value="public">Public sur MYbike</option><option value="friends">Amis seulement</option>
           </select></label>}
@@ -243,7 +272,7 @@ function MediaGallery({ initialRide, initialPost }: { initialRide: string | unde
       </DialogContent>
     </Dialog>
     <Dialog open={Boolean(selected)} onOpenChange={open => { if (!open) setSelected(undefined); }}>
-      {selected && <DialogContent className="max-h-[90dvh] max-w-3xl overflow-y-auto">
+      {selected?.storyUntil ? <StoryViewer key={selected.id} item={selected} close={() => setSelected(undefined)} download={download} /> : selected && <DialogContent className="max-h-[90dvh] max-w-3xl overflow-y-auto">
         <DialogTitle>{selected.title}</DialogTitle>
         <DialogDescription>{selected.session}</DialogDescription>
         {selected.video ? <video src={selected.url} controls className="w-full max-h-[60vh]" /> : <img src={selected.url} alt={selected.title} className="w-full max-h-[60vh] object-contain" />}
@@ -255,6 +284,54 @@ function MediaGallery({ initialRide, initialPost }: { initialRide: string | unde
       </DialogContent>}
     </Dialog>
   </CrewShell>;
+}
+
+function FeedVideo({ url }: { url: string }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const video = ref.current;
+    if (!video || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry?.isIntersecting) void video.play().catch(() => {});
+      else video.pause();
+    }, { threshold: 0.55 });
+    observer.observe(video);
+    return () => { observer.disconnect(); video.pause(); };
+  }, [url]);
+  return <video ref={ref} src={url} muted playsInline controls preload="metadata" className="media-video" />;
+}
+
+function StoryViewer({ item, close, download }: { item: MediaItem; close: () => void; download: () => Promise<void> }) {
+  const [audio, setAudio] = useState('');
+  const [menu, setMenu] = useState(false);
+  useEffect(() => {
+    if (!item.music) return;
+    let active = true;
+    void resolveMedia(item.music).then(url => { if (active) setAudio(url); }).catch(() => {});
+    return () => { active = false; };
+  }, [item.music]);
+  const gps = item.gps;
+  return <DialogContent hideCloseButton className="story-viewer">
+    <DialogTitle className="sr-only">Story de {item.authorName}</DialogTitle>
+    <DialogDescription className="sr-only">{item.title}</DialogDescription>
+    {item.video ? <video src={item.url} autoPlay muted playsInline controls /> : <img src={item.url} alt={item.title} />}
+    <header className="story-header">
+      <Avatar userId={item.author} pilot={(item.authorName || 'M').charAt(0).toUpperCase()} />
+      <strong className="mr-auto truncate">{item.authorName || 'Pilote'}</strong>
+      <Button size="icon" variant="secondary" aria-label="Options de la story" aria-expanded={menu} onClick={() => setMenu(!menu)}><MoreHorizontal /></Button>
+      <Button size="icon" variant="secondary" aria-label="Fermer la story" onClick={close}><X /></Button>
+    </header>
+    {menu && <div className="story-menu">
+      <Button size="sm" variant="secondary" onClick={() => void download()}><Download /> Télécharger</Button>
+      {item.place && <p>{item.place}</p>}
+      {gps && <a className="underline" href={'https://www.openstreetmap.org/?mlat=' + gps[0] + '&mlon=' + gps[1]}>Voir le lieu</a>}
+      {item.link && <a className="underline" href={item.link} target="_blank" rel="noopener noreferrer">Ouvrir le lien</a>}
+    </div>}
+    <div className="story-caption">
+      {item.description && <p>{item.description}</p>}
+      {audio && <audio src={audio} controls preload="none" aria-label="Musique de la story" />}
+    </div>
+  </DialogContent>;
 }
 
 function MediaActions({ item }: { item: MediaItem }) {

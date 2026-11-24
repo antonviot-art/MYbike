@@ -1,11 +1,11 @@
-﻿import { lazy, Suspense, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useEffect, useState, type FormEvent } from 'react';
 import { ClientOnly, Link } from '@tanstack/react-router';
 import { CalendarDays, LocateFixed, MapPin, Plus, Route, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { CrewShell } from './shell';
-import { useCrew } from './context';
+import { resolveMedia, useCrew } from './context';
 import type { CrewRecord } from './data';
 import { readSegments, type TrackPoint } from './tracks';
 
@@ -54,7 +54,7 @@ export function RassoPage({ selected }: { selected?: string | undefined }) {
 }
 
 function RassoForm({ onSaved }: { onSaved: () => void }) {
-  const { add, name, records } = useCrew();
+  const { add, name, records, upload } = useCrew();
   const [pin, setPin] = useState<TrackPoint>();
   const [showMap, setShowMap] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -83,9 +83,12 @@ function RassoForm({ onSaved }: { onSaved: () => void }) {
       toast.error('Renseigne le nom, le lieu et une date à venir.');
       return;
     }
+    const poster = data.get('poster');
+    if (poster instanceof File && poster.size > 10 * 1024 * 1024) { toast.error('L’affiche doit faire moins de 10 Mo.'); return; }
     setSaving(true);
     try {
-      await add('rasso', { title, place, when: when.toISOString(), host: name,
+      const posterPath = poster instanceof File && poster.size ? await upload(poster, poster.name.split('.').at(-1)?.match(/^[a-z\d]{1,8}$/i)?.[0] ?? 'jpg') : undefined;
+      await add('rasso', { title, place, when: when.toISOString(), host: name, ...(posterPath ? { poster: posterPath } : {}),
         ...(pin ? { pin } : {}), ...(ride ? { rideId: ride.id } : {}),
       });
       onSaved();
@@ -96,6 +99,7 @@ function RassoForm({ onSaved }: { onSaved: () => void }) {
 
   return <form className="grid gap-3" onSubmit={submit}>
     <label className="grid gap-1">Nom du rasso<input name="title" placeholder="Ex. Sortie du dimanche" maxLength={80} required /></label>
+    <label className="grid gap-1">Photo d’affiche (facultative)<input name="poster" type="file" accept="image/jpeg,image/png,image/webp" /></label>
     <label className="grid gap-1">Date et heure<input className="w-full" name="when" type="datetime-local" required /></label>
     <label className="grid gap-1">Lieu de rendez-vous<input name="place" placeholder="Ex. Parking du lac" maxLength={140} required /></label>
     <div className="flex flex-wrap gap-2">
@@ -112,6 +116,34 @@ function RassoForm({ onSaved }: { onSaved: () => void }) {
     </select></label>}
     <Button disabled={saving}>{saving ? 'Publication…' : 'Publier le rasso'}</Button>
   </form>;
+}
+
+function EventPoster({ path }: { path: string }) {
+  const [url, setUrl] = useState('');
+  useEffect(() => {
+    let active = true;
+    void resolveMedia(path).then(value => { if (active) setUrl(value); }).catch(() => {});
+    return () => { active = false; };
+  }, [path]);
+  return url ? <img src={url} alt="Affiche du rasso" loading="lazy" className="max-h-96 w-full rounded-xl object-contain" /> : null;
+}
+
+function downloadCalendar(id: string, title: string, place: string, when: Date) {
+  const escape = (value: string) => value.replace(/[\\;,\r\n]/g, character => {
+    if (character === '\r') return '';
+    if (character === '\n') return '\\n';
+    return '\\' + character;
+  });
+  const date = (value: Date) => value.toISOString().replace(/[-:]|\.\d{3}/g, '');
+  const calendar = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//MYbike//Rasso//FR', 'BEGIN:VEVENT',
+    'UID:' + escape(id) + '@mybike', 'DTSTAMP:' + date(new Date()), 'DTSTART:' + date(when),
+    'SUMMARY:' + escape(title), 'LOCATION:' + escape(place), 'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n');
+  const url = URL.createObjectURL(new Blob([calendar], { type: 'text/calendar;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'rasso-mybike.ics';
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function RassoCard({ event, highlighted }: { event: CrewRecord; highlighted: boolean }) {
@@ -176,6 +208,8 @@ function RassoCard({ event, highlighted }: { event: CrewRecord; highlighted: boo
       {user && <Button size="sm" variant="outline" onClick={share}><Share2 /> Inviter par lien</Button>}
     </div>
     {mapOpen && point && <MeetingMap point={point} label={place} />}
+    {typeof payload['poster'] === 'string' && <EventPoster path={payload['poster']} />}
+    {date && <Button size="sm" variant="outline" className="justify-self-start" onClick={() => downloadCalendar(event.id, title, place, when)}><CalendarDays /> Ajouter au calendrier</Button>}
     <div className="flex flex-wrap gap-2" aria-label="Répondre au rasso">
       {responses.map(response => <Button key={response} size="sm" disabled={busy} aria-pressed={votes.get(viewer)?.answer === response}
         variant={votes.get(viewer)?.answer === response ? 'default' : 'outline'} onClick={() => void respond(response)}>
