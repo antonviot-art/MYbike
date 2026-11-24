@@ -10,7 +10,7 @@ import { DifficultyBadge, RideFavorite, RideStats, TrackMap } from './rides';
 import { createRideSpeed } from './ride-speed';
 import type { RouteManeuver, SuggestedRide } from './valhalla.server';
 import { metersBetween, routeProgress, readSegments, readStops, type TrackPoint } from './tracks';
-import { LapResults } from './circuit-recorder';
+import { CircuitRecorder, formatLap, LapResults, readLapTimes } from './circuit-recorder';
 import type { CrewRecord } from './data';
 
 export function RideDetailPage({ rideId, start = false }: { rideId: string; start?: boolean }) {
@@ -27,6 +27,12 @@ export function RideDetailPage({ rideId, start = false }: { rideId: string; star
 
 function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRecord[]; start: boolean }) {
   const { payload } = ride;
+  const { records, add, user } = useCrew();
+  const isCircuit = payload['circuit'] === true || readLapTimes(payload['laps']).length > 0;
+  const publicCircuit = isCircuit && payload['visibility'] === 'public';
+  const [racing, setRacing] = useState(false);
+  const [publishingCircuit, setPublishingCircuit] = useState(false);
+  const [publishedCopy, setPublishedCopy] = useState(false);
   const originalSegments = useMemo(() => readSegments(payload['segments']), [payload]);
   const [returnRoute, setReturnRoute] = useState<SuggestedRide>();
   const [returning, setReturning] = useState(false);
@@ -138,6 +144,31 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
     finally { setReturning(false); }
   }
 
+  const ranking = new Map<string, { name: string; laps: number[] }>();
+  function addRanking(author: string, name: string, value: unknown) {
+    const laps = readLapTimes(value);
+    if (laps.length) ranking.set(author, { name, laps: [...(ranking.get(author)?.laps ?? []), ...laps] });
+  }
+  if (publicCircuit && ride.author_id) addRanking(ride.author_id, String(payload['pilot'] || 'Pilote'), payload['laps']);
+  if (publicCircuit) for (const result of records) {
+    if (result.kind === 'circuit-lap' && result.author_id && result.payload['circuitId'] === ride.id) {
+      addRanking(result.author_id, String(result.payload['pilot'] || 'Pilote'), result.payload['laps']);
+    }
+  }
+  const ranked = [...ranking.entries()].map(([id, entry]) => ({ id, ...entry, best: Math.min(...entry.laps) }))
+    .sort((a, b) => a.best - b.best);
+  const alreadyPublished = publishedCopy || records.some(record => record.author_id === user?.id && record.payload['publishedFromCircuit'] === ride.id);
+  async function publishCircuit() {
+    if (publishingCircuit || alreadyPublished || !user || user.id !== ride.author_id) return;
+    setPublishingCircuit(true);
+    try {
+      await add('ride-track', { ...payload, visibility: 'public', circuit: true, publishedFromCircuit: ride.id });
+      setPublishedCopy(true);
+      toast.success('Boucle publiée dans Plan → Localiser.');
+    } catch { toast.error('La boucle n’a pas pu être publiée.'); }
+    finally { setPublishingCircuit(false); }
+  }
+
   const maxSpeed = typeof payload['maxSpeed'] === 'number' ? payload['maxSpeed'] : undefined;
 
   return <>
@@ -173,8 +204,22 @@ function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRec
       <div className="flex flex-wrap items-center gap-2"><DifficultyBadge ride={ride} /><RideFavorite rideId={ride.id} /></div>
       <h3 className="text-lg font-semibold">{payload['planned'] === true ? 'Trajet prévu' : 'Bilan de sortie'}</h3>
       <LapResults value={payload['laps']} />
+      {isCircuit && !publicCircuit && user?.id === ride.author_id && user && <Button className="justify-self-start" disabled={publishingCircuit || alreadyPublished} onClick={() => void publishCircuit()}>{alreadyPublished ? 'Boucle publiée' : 'Publier la boucle'}</Button>}
       <RideStats distance={Number(payload['distance']) || 0} duration={Number(payload['duration']) || 0} motion={motionStats} maxSpeed={maxSpeed} />
     </section>
+    {publicCircuit && <section className="ride-record grid gap-4">
+      <h3 className="text-lg font-semibold">Classement de la boucle</h3>
+      <div className="flex flex-wrap gap-2">
+        {user && <Button aria-expanded={racing} onClick={() => setRacing(!racing)}><Flag />{racing ? 'Masquer le chrono' : 'Faire la boucle'}</Button>}
+        <Button variant="outline" asChild><Link to="/map" search={{ circuit: ride.id }}><MapPin /> Aller à la boucle</Link></Button>
+      </div>
+      {ranked.length ? <ol className="grid gap-2">{ranked.map((pilot, index) => <li key={pilot.id}>
+        <details><summary className="cursor-pointer">{index + 1}. {pilot.name} · <strong>{formatLap(pilot.best)}</strong></summary>
+          <LapResults value={pilot.laps} />
+        </details>
+      </li>)}</ol> : <p className="text-sm text-muted-foreground">Aucun chrono publié.</p>}
+      <div hidden={!racing}><CircuitRecorder blocked={following} circuit={ride} /></div>
+    </section>}
     <section className="ride-record grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-lg font-semibold">Refaire ce parcours</h3>

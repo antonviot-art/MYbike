@@ -4,7 +4,7 @@ import 'leaflet/dist/leaflet.css';
 import { useCrew } from './context';
 
 const pinIcons = {
-  rasso: '⚑', event: '▦', fuel: '⛽', charging: 'ϟ', parking: 'P', photo: '📷', other: '📍',
+  circuit: '↻', rasso: '⚑', event: '▦', fuel: '⛽', charging: 'ϟ', parking: 'P', photo: '📷', other: '📍',
 };
 
 type Marker = { lat: number; lng: number; label: string; live?: boolean; current?: boolean; accuracy?: number; showName?: boolean; url?: string; color?: string; category?: string; badge?: string; onRemove?: (() => void) | undefined };
@@ -16,7 +16,7 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
   focus: number;
   focusGroup?: boolean;
   follow?: boolean;
-  paths?: { segments: [number, number][][]; label: string }[];
+  paths?: { segments: [number, number][][]; label: string; url?: string }[];
   initialPosition?: { lat: number; lng: number } | undefined;
   onPoint: (lat: number, lng: number) => void;
   onCenter?: (lat: number, lng: number, zoom: number) => void;
@@ -90,7 +90,7 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
     for (const marker of markers) {
       if (!Number.isFinite(marker.lat) || !Number.isFinite(marker.lng)) continue;
       const label = marker.url ? document.createElement('a') : document.createElement('span');
-      if (label instanceof HTMLAnchorElement && marker.url && (marker.url.startsWith('/rasso?') || marker.url.startsWith('/medias?post='))) label.href = marker.url;
+      if (label instanceof HTMLAnchorElement && marker.url && (marker.url.startsWith('/rasso?') || marker.url.startsWith('/medias?post=') || /^\/parcours\/[a-zA-Z0-9-]+$/.test(marker.url))) label.href = marker.url;
       label.textContent = marker.label;
       if (marker.current) {
         const center: L.LatLngTuple = [marker.lat, marker.lng];
@@ -126,7 +126,8 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
       if (marker.showName) dot.bindTooltip(label.cloneNode(true) as HTMLElement, { direction: 'top', offset: [0, -8], permanent: true });
     }
     for (const path of paths ?? []) {
-      const label = document.createElement('span');
+      const label = path.url && /^\/parcours\/[a-zA-Z0-9-]+$/.test(path.url) ? document.createElement('a') : document.createElement('span');
+      if (label instanceof HTMLAnchorElement && path.url) label.href = path.url;
       label.textContent = path.label;
       L.polyline(path.segments, { color: '#2563eb', weight: 4 }).bindPopup(label).addTo(group);
     }

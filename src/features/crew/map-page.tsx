@@ -25,16 +25,16 @@ const categories = [
 const osmTags = { fuel: 'fuel', charging: 'charging_station', parking: 'parking' } as const;
 type NearbyPlace = { lat: number; lng: number; label: string; color: string; category: string };
 
-export function MapPage({ loop = false }: { loop?: boolean }) {
+export function MapPage({ loop = false, circuitId }: { loop?: boolean; circuitId?: string | undefined }) {
   const { records, add, remove, user, sharing, setSharing, positionClock, aerial, setAerial } = useCrew();
-  const [view, setView] = useState<'locate' | 'route'>(loop ? 'route' : 'locate');
+  const [view, setView] = useState<'locate' | 'route'>(loop || circuitId ? 'route' : 'locate');
   const locating = view === 'locate';
   const [focus, setFocus] = useState(0);
   const devicePosition = useInitialPosition();
   const [points, setPoints] = useState<Point[]>([]);
   const [mode, setMode] = useState<'draw' | 'mark' | 'route-start' | 'route-end' | 'route-via'>();
   const [pin, setPin] = useState<Point>();
-  const [routeOpen, setRouteOpen] = useState(loop);
+  const [routeOpen, setRouteOpen] = useState(Boolean(loop || circuitId));
   const [loopMinutes, setLoopMinutes] = useState(90);
   const [loopDirection, setLoopDirection] = useState('nord');
   const generatedLoop = useRef<Point[]>([]);
@@ -49,6 +49,14 @@ export function MapPage({ loop = false }: { loop?: boolean }) {
   const [routeError, setRouteError] = useState('');
   const [saving, setSaving] = useState(false);
   const [category, setCategory] = useState('all');
+  const destinationCircuit = records.find(record => record.id === circuitId && record.kind === 'ride-track' && record.payload['visibility'] === 'public');
+  const circuitDestinationSet = useRef(false);
+  useEffect(() => {
+    const start = readSegments(destinationCircuit?.payload['segments'])[0]?.[0];
+    if (!start || circuitDestinationSet.current) return;
+    circuitDestinationSet.current = true;
+    setRouteEnd(start);
+  }, [destinationCircuit]);
   const [nearby, setNearby] = useState<NearbyPlace[]>([]);
   const nearbyCache = useRef(new Map<string, { expires: number; places: NearbyPlace[] }>());
   const [searching, setSearching] = useState(false);
@@ -63,7 +71,14 @@ export function MapPage({ loop = false }: { loop?: boolean }) {
   const showPlaces = locating && hasPlaces && viewport.zoom >= 10;
   const sharedPosition = sharing && user ? livePilots(records.filter(record => record.author_id === user.id), positionClock)[0] : undefined;
   const ownPosition = sharedPosition ?? devicePosition;
+  const circuitRecords = category === 'all' || category === 'circuits' ? records.filter(record => record.kind === 'ride-track' &&
+    record.payload['circuit'] === true && record.payload['visibility'] === 'public') : [];
   const markers = [
+    ...circuitRecords.flatMap(record => {
+      const point = readSegments(record.payload['segments'])[0]?.[0];
+      return point ? [{ lat: point[0], lng: point[1], label: String(record.payload['name'] ?? 'Boucle'), live: false,
+        color: '#7c3aed', category: 'circuit', url: '/parcours/' + encodeURIComponent(record.id) }] : [];
+    }),
     ...(!user && (category === 'all' || category === 'parking') ? [{ lat: 48.065, lng: 6.863, label: 'Parking du lac · Démo', color: '#2563eb', category: 'parking', live: false }] : []),
     ...records.filter(record => record.kind === 'marker' && (category === 'all' || (record.payload['category'] ?? 'other') === category)).map(record => ({
       lat: Number(record.payload['lat']), lng: Number(record.payload['lng']),
@@ -282,7 +297,7 @@ export function MapPage({ loop = false }: { loop?: boolean }) {
       <section className="map-screen" aria-label="Carte des sorties">
         <ClientOnly fallback={<div className="map-canvas bg-secondary grid place-items-center">Chargement de la carte…</div>}>
           <Suspense fallback={<div className="map-canvas bg-secondary" />}>
-            <MapView points={locating ? (category === 'location' && !mode ? noPoints : points) : (suggested?.points ?? noPoints)} markers={locating ? markers : [...markers.filter(marker => marker.live), ...routeMarkers]} paths={locating ? sharedPaths : []} focus={focus} initialPosition={devicePosition} onCenter={(lat, lng, zoom) => setViewport({ lat, lng, zoom })} onPoint={(lat, lng) => {
+            <MapView points={locating ? (category === 'location' && !mode ? noPoints : points) : (suggested?.points ?? noPoints)} markers={locating ? markers : [...markers.filter(marker => marker.live), ...routeMarkers]} paths={locating ? [...sharedPaths, ...circuitRecords.map(record => ({ label: String(record.payload['name'] ?? 'Boucle'), url: '/parcours/' + encodeURIComponent(record.id), segments: readSegments(record.payload['segments']) }))] : []} focus={focus} initialPosition={devicePosition} onCenter={(lat, lng, zoom) => setViewport({ lat, lng, zoom })} onPoint={(lat, lng) => {
               if (mode === 'draw') setPoints(current => [...current, [lat, lng]]);
               if (mode === 'mark') { setPin([lat, lng]); setMode(undefined); }
               if (mode === 'route-start' || mode === 'route-end' || mode === 'route-via') {
@@ -302,6 +317,7 @@ export function MapPage({ loop = false }: { loop?: boolean }) {
           <select aria-label="Catégorie de lieux" value={category} onChange={event => setCategory(event.target.value)}>
             <option value="all">Tous les lieux</option>
             <option value="location">Localisation seulement</option>
+            <option value="circuits">Boucles chronométrées</option>
             {categories.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
           </select>
           {hasPlaces && (!showPlaces || searching || placeError) && <span role="status" className="map-place-status">
@@ -374,7 +390,7 @@ export function MapPage({ loop = false }: { loop?: boolean }) {
             </Button>
             {routeStart && devicePosition && <Button variant="ghost" size="sm" disabled={routeBusy} onClick={() => { setRouteStart(undefined); setSuggested(undefined); }}>Partir de ma position</Button>}
             <Button variant="outline" disabled={routeBusy} onClick={() => { setMode('route-end'); setRouteOpen(false); }}>
-              {routeEnd ? 'Modifier la destination' : 'Choisir la destination sur la carte'}
+              {routeEnd ? (destinationCircuit ? 'Départ de ' + String(destinationCircuit.payload['name'] ?? 'la boucle') + ' · modifier' : 'Modifier la destination') : 'Choisir la destination sur la carte'}
             </Button>
             {via.length > 0 && <ol className="grid gap-1" aria-label="Points de passage">
               {via.map(([lat, lng], index) => <li key={index} className="flex items-center justify-between gap-2">
