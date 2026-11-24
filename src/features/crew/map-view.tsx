@@ -7,7 +7,7 @@ const pinIcons = {
   rasso: '⚑', event: '▦', fuel: '⛽', charging: 'ϟ', parking: 'P', photo: '📷', other: '📍',
 };
 
-type Marker = { lat: number; lng: number; label: string; live?: boolean; current?: boolean; accuracy?: number; showName?: boolean; url?: string; color?: string; category?: string; onRemove?: (() => void) | undefined };
+type Marker = { lat: number; lng: number; label: string; live?: boolean; current?: boolean; accuracy?: number; showName?: boolean; url?: string; color?: string; category?: string; badge?: string; onRemove?: (() => void) | undefined };
 
 export default function MapView({ points, segments, markers, focus, focusGroup = false, follow = false, paths, initialPosition, onPoint, onCenter }: {
   points: [number, number][];
@@ -113,7 +113,7 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
         icon.className = 'map-pin-icon';
         icon.style.backgroundColor = marker.color ?? color;
         const category = marker.category as keyof typeof pinIcons;
-        icon.textContent = Object.hasOwn(pinIcons, category) ? pinIcons[category] : pinIcons.other;
+        icon.textContent = marker.badge ?? (Object.hasOwn(pinIcons, category) ? pinIcons[category] : pinIcons.other);
         L.marker([marker.lat, marker.lng], {
           title: marker.label,
           alt: marker.label,

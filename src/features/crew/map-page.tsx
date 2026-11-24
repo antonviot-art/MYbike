@@ -38,11 +38,13 @@ export function MapPage() {
     return () => { active = false; };
   }, []);
   const [points, setPoints] = useState<Point[]>([]);
-  const [mode, setMode] = useState<'draw' | 'mark' | 'route-start' | 'route-end'>();
+  const [mode, setMode] = useState<'draw' | 'mark' | 'route-start' | 'route-end' | 'route-via'>();
   const [pin, setPin] = useState<Point>();
   const [routeOpen, setRouteOpen] = useState(false);
   const [routeStart, setRouteStart] = useState<Point>();
   const [routeEnd, setRouteEnd] = useState<Point>();
+  const [via, setVia] = useState<Point[]>([]);
+  const maxVia = 6;
   const [preference, setPreference] = useState<RoutePreference>('mixed');
   const [suggested, setSuggested] = useState<SuggestedRide>();
   const [routeBusy, setRouteBusy] = useState(false);
@@ -81,6 +83,11 @@ export function MapPage() {
     ...livePilots(records, positionClock, user?.id),
     ...(ownPosition ? [{ ...ownPosition, live: true, current: true, label: 'Ta position' }] : []),
     ...(showPlaces ? nearby : []).filter(place => category === 'all' || place.category === category).map(place => ({ ...place, live: false })),
+  ];
+  const routeMarkers = [
+    ...(routeStart ? [{ lat: routeStart[0], lng: routeStart[1], label: 'Départ', category: 'other', color: '#15803d' }] : []),
+    ...via.map(([lat, lng], index) => ({ lat, lng, label: 'Passage ' + (index + 1), badge: String(index + 1), color: '#2563eb' })),
+    ...(routeEnd ? [{ lat: routeEnd[0], lng: routeEnd[1], label: 'Destination', category: 'rasso', color: '#dc2626' }] : []),
   ];
   const sharedPaths = category === 'all' ? records.filter(record => record.kind === 'ride-track' && record.payload['communityTrail'] === true).map(record => ({
     label: 'Chemin partagé par ' + String(record.payload['pilot'] || 'un pilote'), segments: readSegments(record.payload['segments']),
@@ -146,12 +153,12 @@ export function MapPage() {
     try {
       const response = await fetch('/api/moto-route', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ start, end: routeEnd, preference }),
+        body: JSON.stringify({ start, end: routeEnd, preference, via }),
       });
       if (!response.ok) {
         const { error } = await response.json() as { error?: string };
         setRouteError(error === 'disabled' ? 'Le calcul Valhalla est en attente d’activation.' : error === 'no-route'
-          ? 'Aucun itinéraire moto trouvé entre ces deux points.' : error === 'busy'
+          ? 'Aucun itinéraire moto trouvé entre ces deux points.' : error === 'unreachable-via' ? 'Impossible de relier tous les points à moto. Déplace le repère vers une voie accessible, ou retire-le.' : error === 'busy'
             ? 'Le service gratuit est occupé. Réessaie dans un instant.' : 'Le calcul est indisponible pour le moment.');
         return;
       }
@@ -189,12 +196,13 @@ export function MapPage() {
       <section className="map-screen" aria-label="Carte des sorties">
         <ClientOnly fallback={<div className="map-canvas bg-secondary grid place-items-center">Chargement de la carte…</div>}>
           <Suspense fallback={<div className="map-canvas bg-secondary" />}>
-            <MapView points={locating ? (category === 'location' && !mode ? noPoints : points) : (suggested?.points ?? noPoints)} markers={locating ? markers : markers.filter(marker => marker.live)} paths={locating ? sharedPaths : []} focus={focus} initialPosition={devicePosition} onCenter={(lat, lng, zoom) => setViewport({ lat, lng, zoom })} onPoint={(lat, lng) => {
+            <MapView points={locating ? (category === 'location' && !mode ? noPoints : points) : (suggested?.points ?? noPoints)} markers={locating ? markers : [...markers.filter(marker => marker.live), ...routeMarkers]} paths={locating ? sharedPaths : []} focus={focus} initialPosition={devicePosition} onCenter={(lat, lng, zoom) => setViewport({ lat, lng, zoom })} onPoint={(lat, lng) => {
               if (mode === 'draw') setPoints(current => [...current, [lat, lng]]);
               if (mode === 'mark') { setPin([lat, lng]); setMode(undefined); }
-              if (mode === 'route-start' || mode === 'route-end') {
+              if (mode === 'route-start' || mode === 'route-end' || mode === 'route-via') {
                 if (mode === 'route-start') setRouteStart([lat, lng]);
-                else setRouteEnd([lat, lng]);
+                else if (mode === 'route-end') setRouteEnd([lat, lng]);
+                else setVia(current => current.length < maxVia ? [...current, [lat, lng]] : current);
                 setMode(undefined);
                 setSuggested(undefined);
                 setRouteError('');
@@ -245,7 +253,7 @@ export function MapPage() {
         </div>
         {(mode || locating && (sharing || sharedRoutes.length > 0 && category !== 'location')) && <div className="map-status">
           {locating && sharing && <p>Position partagée avec les membres connectés.</p>}
-          {mode && <p>{mode === 'draw' ? 'Touche la carte pour tracer ton parcours.' : mode === 'route-start' ? 'Touche la carte pour choisir le départ.' : mode === 'route-end' ? 'Touche la carte pour choisir la destination.' : 'Touche la carte pour placer le repère.'}</p>}
+          {mode && <p>{mode === 'draw' ? 'Touche la carte pour tracer ton parcours.' : mode === 'route-start' ? 'Touche la carte pour choisir le départ.' : mode === 'route-end' ? 'Touche la carte pour choisir la destination.' : mode === 'route-via' ? 'Touche le chemin pour ajouter un point de passage.' : 'Touche la carte pour placer le repère.'}</p>}
           {locating && category !== 'location' && sharedRoutes.length > 0 && <select aria-label="Parcours partagés" value="" onChange={event => {
             const record = sharedRoutes.find(item => item.id === event.target.value);
             if (record) setPoints(record.payload['points'] as Point[]);
@@ -258,7 +266,7 @@ export function MapPage() {
       <Dialog open={routeOpen} onOpenChange={setRouteOpen}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto">
           <DialogTitle>Itinéraire moto</DialogTitle>
-          <DialogDescription>Choisis une destination sur la carte. Le calcul envoie les deux points au serveur de démo Valhalla.</DialogDescription>
+          <DialogDescription>Choisis une destination sur la carte. Le calcul envoie les points au serveur de démo Valhalla.</DialogDescription>
           <div className="grid gap-2 text-sm">
             <Button variant="outline" disabled={routeBusy} onClick={() => { setMode('route-start'); setRouteOpen(false); }}>
               {routeStart ? 'Modifier le départ' : devicePosition ? 'Départ depuis ta position · modifier' : 'Choisir le départ'}
@@ -267,6 +275,19 @@ export function MapPage() {
             <Button variant="outline" disabled={routeBusy} onClick={() => { setMode('route-end'); setRouteOpen(false); }}>
               {routeEnd ? 'Modifier la destination' : 'Choisir la destination sur la carte'}
             </Button>
+            <Button variant="outline" disabled={routeBusy || via.length >= maxVia} onClick={() => { setMode('route-via'); setRouteOpen(false); }}>
+              <MapPin /> Ajouter un point de passage
+            </Button>
+            {via.length > 0 && <ol className="grid gap-1" aria-label="Points de passage">
+              {via.map(([lat, lng], index) => <li key={index} className="flex items-center justify-between gap-2">
+                <span>{index + 1}. {lat.toFixed(5)}, {lng.toFixed(5)}</span>
+                <Button variant="ghost" size="sm" disabled={routeBusy} onClick={() => {
+                  setVia(current => current.filter((_, position) => position !== index));
+                  setSuggested(undefined);
+                  setRouteError('');
+                }} aria-label={'Retirer le point de passage ' + (index + 1)}>Retirer</Button>
+              </li>)}
+            </ol>}
             <label className="grid gap-1">Type de trajet
               <select value={preference} disabled={routeBusy} onChange={event => { setPreference(event.target.value as RoutePreference); setSuggested(undefined); }}>
                 <option value="road">Route privilégiée</option>
@@ -281,7 +302,7 @@ export function MapPage() {
               <Button variant="outline" onClick={() => setRouteOpen(false)}>Voir sur la carte</Button>
               <ol className="grid list-decimal gap-1 pl-5">{suggested.directions.map((step, index) => <li key={index}>{step}</li>)}</ol>
             </>}
-            <p className="text-xs text-muted-foreground">Le profil exprime une préférence. Respecte la signalisation et les accès sur place.</p>
+            <p className="text-xs text-muted-foreground">En mode Chemins privilégiés, Valhalla peut choisir la route. Pose un point au milieu d’un chemin ouvert aux motos pour faire passer le trajet à cet endroit.</p>
             <p className="text-xs text-muted-foreground">Calcul Valhalla · FOSSGIS · <a className="underline" href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a></p>
           </div>
         </DialogContent>
