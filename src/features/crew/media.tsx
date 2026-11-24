@@ -12,6 +12,7 @@ import { jpeg, loadPhoto } from './photo-crop';
 import { photoGps } from './photo-gps';
 import { readSegments, type TrackPoint } from './tracks';
 import { TrackMap } from './rides';
+import { licensedStoryTracks, type StoryTrack } from './story-music';
 
 type MediaItem = {
   id: string;
@@ -33,7 +34,7 @@ type MediaItem = {
   musicId?: string | undefined;
 };
 
-const storyTracks = [
+const originalStoryTracks: StoryTrack[] = [
   { id: 'ligne-rouge', title: 'Ligne rouge', style: 'Électro · 132 BPM' },
   { id: 'route-de-nuit', title: 'Route de nuit', style: 'Synthé · 98 BPM' },
   { id: 'poussiere', title: 'Poussière', style: 'Breakbeat · 112 BPM' },
@@ -46,10 +47,12 @@ const storyTracks = [
   { id: 'reflets', title: 'Reflets', style: 'Synthé · 92 BPM' },
   { id: 'signal', title: 'Signal', style: 'Électro · 118 BPM' },
   { id: 'crepuscule', title: 'Crépuscule', style: 'Chill · 80 BPM' },
-] as const;
+];
 
-function storyTrackUrl(track: (typeof storyTracks)[number]) {
-  return '/story-music/' + track.id + '.wav';
+const storyTracks = [...originalStoryTracks, ...licensedStoryTracks];
+
+function storyTrackUrl(track: StoryTrack) {
+  return '/story-music/' + track.id + (track.credit ? '.mp3' : '.wav');
 }
 
 type CommunityTrack = { id: string; title: string; author: string; path: string };
@@ -346,7 +349,10 @@ function StoryMusicPicker({ community }: { community: CommunityTrack[] }) {
       <select name="musicId" value={id} onChange={event => setId(event.currentTarget.value)}>
         <option value="">Sans musique</option>
         <optgroup label="Catalogue MYbike">
-          {storyTracks.map(item => <option key={item.id} value={item.id}>{item.title} · {item.style}</option>)}
+          {originalStoryTracks.map(item => <option key={item.id} value={item.id}>{item.title} · {item.style}</option>)}
+        </optgroup>
+        <optgroup label="Musique libre">
+          {licensedStoryTracks.map(item => <option key={item.id} value={item.id}>{item.title} · {item.credit?.artist}</option>)}
         </optgroup>
         <optgroup label="Communauté">
           {community.length ? community.map(item => <option key={item.id} value={item.id}>{item.title} · {item.author}</option>)
@@ -355,8 +361,17 @@ function StoryMusicPicker({ community }: { community: CommunityTrack[] }) {
       </select>
     </label>
     {previewUrl && <audio key={id} src={previewUrl} className="w-full" controls preload="none" aria-label="Aperçu du morceau" />}
+    {track?.credit && <StoryMusicCredit track={track} />}
     <CommunityMusicUpload />
   </div>;
+}
+
+function StoryMusicCredit({ track }: { track: StoryTrack }) {
+  if (!track.credit) return null;
+  return <span className="story-music-credit text-xs">
+    Extrait de « {track.title} » · <a className="underline" href={track.credit.source} target="_blank" rel="noreferrer">{track.credit.artist}</a>
+    {' · '}<a className="underline" href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>
+  </span>;
 }
 
 function CommunityMusicUpload() {
@@ -433,7 +448,7 @@ function StoryViewer({ item, community, close, download }: { item: MediaItem; co
     </div>}
     <div className="story-caption">
       {item.description && <p>{item.description}</p>}
-      {track ? <div className="story-music"><span>♫ {track.title}</span><audio src={storyTrackUrl(track)} autoPlay loop controls aria-label={'Musique de la story · ' + track.title} /></div>
+      {track ? <div className="story-music">{track.credit ? <StoryMusicCredit track={track} /> : <span>♫ {track.title}</span>}<audio src={storyTrackUrl(track)} autoPlay loop controls aria-label={'Musique de la story · ' + track.title} /></div>
         : audio && <div className="story-music">{community && <span>♫ {community.title}</span>}
           <audio src={audio} controls autoPlay={Boolean(community)} loop={Boolean(community)} aria-label="Musique de la story" /></div>}
     </div>
