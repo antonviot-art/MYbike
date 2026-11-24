@@ -9,7 +9,7 @@ const pinIcons = {
 
 type Marker = { lat: number; lng: number; label: string; live?: boolean; current?: boolean; accuracy?: number; showName?: boolean; url?: string; color?: string; category?: string; onRemove?: (() => void) | undefined };
 
-export default function MapView({ points, segments, markers, focus, focusGroup = false, follow = false, paths, onPoint, onCenter }: {
+export default function MapView({ points, segments, markers, focus, focusGroup = false, follow = false, paths, initialPosition, onPoint, onCenter }: {
   points: [number, number][];
   segments?: [number, number][][];
   markers: Marker[];
@@ -17,6 +17,7 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
   focusGroup?: boolean;
   follow?: boolean;
   paths?: { segments: [number, number][][]; label: string }[];
+  initialPosition?: { lat: number; lng: number } | undefined;
   onPoint: (lat: number, lng: number) => void;
   onCenter?: (lat: number, lng: number, zoom: number) => void;
 }) {
@@ -24,6 +25,7 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
   const { aerial } = useCrew();
   const map = useRef<L.Map>(null);
   const layer = useRef<L.LayerGroup>(null);
+  const initialCenterHandled = useRef(false);
   const callback = useRef(onPoint);
   callback.current = onPoint;
   const centerCallback = useRef(onCenter);
@@ -40,7 +42,11 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
     const instance = L.map(el.current).setView([48.067, 6.862], 12);
     map.current = instance;
     layer.current = L.layerGroup().addTo(instance);
-    instance.on('click', event => callback.current(event.latlng.lat, event.latlng.lng));
+    instance.on('dragstart zoomstart', () => { initialCenterHandled.current = true; });
+    instance.on('click', event => {
+      initialCenterHandled.current = true;
+      callback.current(event.latlng.lat, event.latlng.lng);
+    });
     instance.on('moveend', () => {
       const center = instance.getCenter().wrap();
       centerCallback.current?.(center.lat, center.lng, instance.getZoom());
@@ -49,6 +55,12 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
     resize.observe(el.current);
     return () => { resize.disconnect(); instance.remove(); map.current = null; };
   }, []);
+
+  useEffect(() => {
+    if (!initialPosition || initialCenterHandled.current) return;
+    initialCenterHandled.current = true;
+    map.current?.setView([initialPosition.lat, initialPosition.lng], 14, { animate: false });
+  }, [initialPosition]);
 
   useEffect(() => {
     const instance = map.current;

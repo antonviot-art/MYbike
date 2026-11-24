@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, BarChart3, Camera, Copy, MapPin, MessageSquare, Mic, Plus, Send, Square, UserPlus, UsersRound } from 'lucide-react';
+import { ArrowLeft, BarChart3, Camera, Copy, Download, ImagePlus, MapPin, MessageSquare, Mic, Plus, Send, Square, UserPlus, UsersRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { Link } from '@tanstack/react-router';
 import { Button } from '@/components/ui/button';
@@ -240,6 +240,8 @@ function Conversation({ room, onBack, onPhoto }: { room: Room; onBack: () => voi
   const [pollOpen, setPollOpen] = useState(false);
   const [recording, setRecording] = useState(false);
   const [micPending, setMicPending] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const photoInput = useRef<HTMLInputElement>(null);
   const recorder = useRef<MediaRecorder | null>(null);
   const micOpening = useRef(false);
   const active = useRef(false);
@@ -279,6 +281,23 @@ function Conversation({ room, onBack, onPhoto }: { room: Room; onBack: () => voi
     } catch {
       toast.error('Le message n’a pas été envoyé.');
     }
+  }
+
+  async function sendPhoto(file: File) {
+    if (uploadingPhoto) return;
+    const extension = file.name.split('.').at(-1)?.toLowerCase();
+    if (!extension || !['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif', 'heic', 'heif'].includes(extension) ||
+      (file.type && !file.type.startsWith('image/'))) {
+      toast.error('Choisis un fichier photo.');
+      return;
+    }
+    if (!file.size || file.size > 50 * 1024 * 1024) { toast.error('Choisis une photo de 50 Mo maximum.'); return; }
+    setUploadingPhoto(true);
+    try {
+      const photo = await upload(file, extension, room.id.startsWith('room:') ? 'rooms/' + room.id.slice(5) : undefined);
+      await post({ text: 'Photo originale', photo, filename: file.name });
+    } catch { toast.error('La photo n’a pas été envoyée.'); }
+    finally { setUploadingPhoto(false); }
   }
 
   async function inviteFriend() {
@@ -405,6 +424,7 @@ function Conversation({ room, onBack, onPhoto }: { room: Room; onBack: () => voi
             );
           }
           const message = record.payload as unknown as Message;
+          const photo = record.payload['photo'];
           const own = user ? record.author_id === user.id : message.name === name;
           return (
             <div key={record.id} className={`mb-4 flex items-end gap-2 ${own ? 'flex-row-reverse' : ''}`}>
@@ -417,7 +437,7 @@ function Conversation({ room, onBack, onPhoto }: { room: Room; onBack: () => voi
                     ? <Link to="/pilotes/$pilotId" params={{ pilotId: record.author_id }} className="font-semibold text-foreground hover:underline">{message.name}</Link>
                     : own ? 'Toi' : message.name} · {message.time}
                 </p>
-                <div className={`bubble max-w-full break-words text-left ${own ? 'bubble-own' : ''}`}>{message.audio ? <VoiceMessage path={message.audio} /> : message.text}</div>
+                <div className={`bubble max-w-full break-words text-left ${own ? 'bubble-own' : ''}`}>{message.audio ? <VoiceMessage path={message.audio} /> : typeof photo === 'string' ? <ChatPhoto path={photo} filename={String(record.payload['filename'] || 'photo')} /> : message.text}</div>
               </div>
             </div>
           );
@@ -426,8 +446,15 @@ function Conversation({ room, onBack, onPhoto }: { room: Room; onBack: () => voi
       <div className="conversation-compose border-t border-border p-3"><form className="flex items-center gap-2" onSubmit={send}>
           <input className="w-0 flex-1" aria-label="Ton message" placeholder="Écris un message…" value={text} onChange={event => setText(event.target.value)} />
           <Button type="button" variant="ghost" size="icon" aria-label={recording ? 'Envoyer le vocal' : 'Enregistrer un vocal'} disabled={micPending} onClick={recordVoice}>{recording ? <Square /> : <Mic />}</Button>
+          <input ref={photoInput} type="file" hidden accept="image/*,.heic,.heif" onChange={event => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = '';
+            if (file) void sendPhoto(file);
+          }} />
+          <Button type="button" variant="ghost" size="icon" disabled={uploadingPhoto} aria-label="Envoyer une photo originale" onClick={() => photoInput.current?.click()}><ImagePlus /></Button>
           <Button type="submit" size="icon" disabled={!text.trim()} aria-label="Envoyer le message"><Send /></Button>
         </form>
+        {uploadingPhoto && <p role="status" className="mt-2 text-sm">Envoi de la photo originale…</p>}
         {recording && <p role="status" className="mt-2 text-sm">Enregistrement en cours…</p>}
         <Button type="button" variant="ghost" className="mt-2" aria-expanded={pollOpen} onClick={() => setPollOpen(!pollOpen)}><BarChart3 /> Sondage</Button>
         {pollOpen && (
@@ -440,6 +467,36 @@ function Conversation({ room, onBack, onPhoto }: { room: Room; onBack: () => voi
       </div>
     </section>
   );
+}
+
+function ChatPhoto({ path, filename }: { path: string; filename: string }) {
+  const [url, setUrl] = useState('');
+  const [downloading, setDownloading] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void resolveMedia(path).then(value => { if (active) setUrl(value); }).catch(() => {});
+    return () => { active = false; };
+  }, [path]);
+
+  async function download() {
+    setDownloading(true);
+    try {
+      const response = await fetch(await resolveMedia(path));
+      if (!response.ok) throw new Error();
+      const original = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = original;
+      link.download = filename;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(original), 1000);
+    } catch { toast.error('Impossible de télécharger la photo originale.'); }
+    finally { setDownloading(false); }
+  }
+
+  return <div className="grid gap-2">
+    {url && <img src={url} loading="lazy" alt={filename} className="max-h-64 w-full rounded-lg object-contain" onError={() => setUrl('')} />}
+    <Button size="sm" variant="secondary" disabled={downloading} onClick={() => void download()}><Download /> Télécharger l’original</Button>
+  </div>;
 }
 
 function VoiceMessage({ path }: { path: string }) {

@@ -11,6 +11,8 @@ export function useTrackRecorder(key: string) {
   const [recording, setRecording] = useState(false);
   const [accuracy, setAccuracy] = useState<number>();
   const [speedReading, setSpeedReading] = useState<SpeedReading>();
+  const peak = useRef<number | undefined>(undefined);
+  const [maxSpeed, setMaxSpeed] = useState<number>();
   const [position, setPosition] = useState<{ point: TrackPoint; accuracy: number }>();
   const [stops, setStops] = useState<TrackStop[]>([]);
   const savedStops = useRef<TrackStop[]>([]);
@@ -29,6 +31,8 @@ export function useTrackRecorder(key: string) {
         durationRef.current = Number.isFinite(draft.duration) ? Math.max(0, draft.duration) : 0;
         savedStops.current = readStops(draft.stops);
         if (Number.isFinite(draft.motion?.milliseconds) && Number.isFinite(draft.motion?.meters)) moving.current = draft.motion;
+        peak.current = typeof draft.maxSpeed === 'number' && Number.isFinite(draft.maxSpeed) && draft.maxSpeed >= 0 ? draft.maxSpeed : undefined;
+        setMaxSpeed(peak.current);
         setStops(savedStops.current);
         setMotion(moving.current);
         setSegments(data.current);
@@ -45,6 +49,7 @@ export function useTrackRecorder(key: string) {
         duration: durationRef.current + (started.current ? Date.now() - started.current : 0),
         stops: savedStops.current,
         motion: moving.current,
+        maxSpeed: peak.current,
       }));
     } catch { /* The current session still holds the route. */ }
   }
@@ -87,6 +92,10 @@ export function useTrackRecorder(key: string) {
       if (Number.isFinite(coords.accuracy)) setPosition({ point, accuracy: coords.accuracy });
       setAccuracy(Math.round(coords.accuracy));
       const reading = estimateSpeed({ point, timestamp, accuracy: coords.accuracy, reported: coords.speed });
+      if (reading && (peak.current === undefined || reading.kmh > peak.current)) {
+        peak.current = reading.kmh;
+        setMaxSpeed(reading.kmh);
+      }
       if (reading && previousMotion) {
         const milliseconds = timestamp - previousMotion.time;
         const average = (previousMotion.kmh + reading.kmh) / 2;
@@ -167,6 +176,8 @@ export function useTrackRecorder(key: string) {
     moving.current = { milliseconds: 0, meters: 0 };
     setStops([]);
     setMotion(moving.current);
+    peak.current = undefined;
+    setMaxSpeed(undefined);
     setSegments([]);
     setDuration(0);
     setAccuracy(undefined);
@@ -182,5 +193,5 @@ export function useTrackRecorder(key: string) {
     return true;
   }
 
-  return { segments, distance: trackDistance(segments), duration, recording, accuracy, speed: speedReading?.kmh, speedSource: speedReading?.source, position, motion, stops, addStop, start, stop, clear };
+  return { segments, distance: trackDistance(segments), duration, recording, accuracy, speed: speedReading?.kmh, maxSpeed, speedSource: speedReading?.source, position, motion, stops, addStop, start, stop, clear };
 }

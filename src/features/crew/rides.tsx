@@ -19,6 +19,22 @@ type DashboardLayout = 'map' | 'balanced' | 'speed';
 const terrains = ['Route', 'Cross', 'Enduro'] as const;
 const dashboardLayoutKey = 'mybike:dashboard-layout';
 
+export function RideStats({ distance, duration, motion, maxSpeed }: {
+  distance: number; duration: number; motion?: { meters: number; milliseconds: number } | undefined;
+  maxSpeed?: number | undefined;
+}) {
+  const formatDuration = (ms: number) => Math.floor(ms / 60000) + ' min ' + Math.floor(ms / 1000) % 60 + ' s';
+  const formatSpeed = (kmh: number) => Number.isFinite(kmh) && kmh >= 0 ? kmh.toFixed(1).replace('.', ',') + ' km/h' : '—';
+  return <dl className="weather-details">
+    <div><dt>Distance</dt><dd>{kilometers(distance)}</dd></div>
+    <div><dt>Durée totale</dt><dd>{formatDuration(duration)}</dd></div>
+    <div><dt>Temps en mouvement</dt><dd>{motion && motion.milliseconds > 0 ? formatDuration(motion.milliseconds) : '—'}</dd></div>
+    <div><dt>Vitesse max GPS</dt><dd>{formatSpeed(maxSpeed ?? NaN)}</dd></div>
+    <div><dt>Moyenne en mouvement</dt><dd>{formatSpeed(motion ? motion.meters * 3600 / motion.milliseconds : NaN)}</dd></div>
+    <div><dt>Moyenne sur la sortie</dt><dd>{formatSpeed(distance * 3600 / duration)}</dd></div>
+  </dl>;
+}
+
 export function TrackMap({ segments, position, stops = [], follow = false, pilots = [], focusPilots = false, photoMarkers = [], onPoint = ignoreMapClick }: {
   segments: TrackPoint[][]; position?: Position | undefined; stops?: TrackStop[]; follow?: boolean; pilots?: ReturnType<typeof livePilots>; focusPilots?: boolean;
   onPoint?: (lat: number, lng: number) => void;
@@ -189,7 +205,7 @@ function RideRecorder() {
     setSaving(true);
     try {
       await add('ride-track', { name: title, description, pilot: name, place: String(form.get('place') ?? '').trim(),
-        terrain: terrains.find(item => item === form.get('terrain')), communityTrail: form.has('communityTrail'), segments: draft.segments, distance: draft.distance, duration: draft.duration, motion: draft.motion, stops: draft.stops });
+        terrain: terrains.find(item => item === form.get('terrain')), communityTrail: form.has('communityTrail'), segments: draft.segments, distance: draft.distance, duration: draft.duration, motion: draft.motion, maxSpeed: draft.maxSpeed, stops: draft.stops });
       draft.clear();
       target.reset();
       toast.success(user ? 'Parcours partagé sur ton profil.' : 'Parcours ajouté à cette démo.');
@@ -269,11 +285,7 @@ function RideRecorder() {
         <input name="label" className="flex-1" placeholder="Ex. Pause ou rendez-vous" aria-label="Nom du repère" maxLength={80} required />
         <Button>Enregistrer le repère</Button>
       </form>}
-      {!draft.recording && canSave && <dl className="grid grid-cols-3 gap-2 text-sm">
-        <div><dt>Distance</dt><dd className="font-semibold">{kilometers(draft.distance)}</dd></div>
-        <div><dt>Durée</dt><dd className="font-semibold">{duration}</dd></div>
-        <div><dt>Moyenne en mouvement</dt><dd className="font-semibold">{draft.motion.milliseconds > 0 ? (draft.motion.meters * 3600 / draft.motion.milliseconds).toFixed(1) + ' km/h' : '—'}</dd></div>
-      </dl>}
+      {!draft.recording && canSave && <RideStats distance={draft.distance} duration={draft.duration} motion={draft.motion} maxSpeed={draft.maxSpeed} />}
       {!draft.recording && canSave && <form onSubmit={publish} className="grid gap-2">
         <input name="title" aria-label="Nom du parcours" placeholder="Nom du parcours" required maxLength={80} />
         <textarea name="description" aria-label="Description du parcours" placeholder="Description (facultative)" maxLength={600} />

@@ -4,8 +4,8 @@ import { ArrowLeft, ImagePlus, LocateFixed, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { CrewShell } from './shell';
 import { resolveMedia, useCrew } from './context';
-import { TrackMap } from './rides';
-import { kilometers, metersFromRoute, readSegments, readStops, type TrackPoint } from './tracks';
+import { RideStats, TrackMap } from './rides';
+import { metersFromRoute, readSegments, readStops, type TrackPoint } from './tracks';
 import type { CrewRecord } from './data';
 
 export function RideDetailPage({ rideId }: { rideId: string }) {
@@ -48,7 +48,8 @@ function RideDetail({ ride, photos }: { ride: CrewRecord; photos: CrewRecord[] }
   const motion = payload['motion'] as { meters?: unknown; milliseconds?: unknown } | undefined;
   const movingTime = Number(motion?.milliseconds);
   const movingDistance = Number(motion?.meters);
-  const average = movingTime > 0 && Number.isFinite(movingDistance) ? movingDistance * 3600 / movingTime : undefined;
+  const motionStats = movingTime > 0 && Number.isFinite(movingTime) && Number.isFinite(movingDistance)
+    ? { milliseconds: movingTime, meters: movingDistance } : undefined;
   const distanceToRoute = position && position.accuracy <= 35 ? metersFromRoute(position.point, segments) : undefined;
   const photoMarkers = photos.flatMap(photo => {
     const point = readSegments([[photo.payload['gps']]])[0]?.[0];
@@ -56,7 +57,7 @@ function RideDetail({ ride, photos }: { ride: CrewRecord; photos: CrewRecord[] }
       label: String(photo.payload['description'] || 'Voir la photo'),
       url: '/medias?post=' + encodeURIComponent(photo.id) }] : [];
   });
-  const duration = Math.round((Number(payload['duration']) || 0) / 60000);
+  const maxSpeed = typeof payload['maxSpeed'] === 'number' ? payload['maxSpeed'] : undefined;
 
   return <>
     <section className="ride-record grid gap-4">
@@ -66,11 +67,7 @@ function RideDetail({ ride, photos }: { ride: CrewRecord; photos: CrewRecord[] }
       </header>
       {Boolean(payload['description']) && <p className="whitespace-pre-wrap break-words">{String(payload['description'])}</p>}
       <h3 className="text-lg font-semibold">Bilan de sortie</h3>
-      <dl className="weather-details">
-        <div><dt>Distance</dt><dd>{kilometers(Number(payload['distance']) || 0)}</dd></div>
-        <div><dt>Durée</dt><dd>{duration} min</dd></div>
-        <div><dt>Moyenne en mouvement</dt><dd>{average === undefined ? '—' : average.toFixed(1) + ' km/h'}</dd></div>
-      </dl>
+      <RideStats distance={Number(payload['distance']) || 0} duration={Number(payload['duration']) || 0} motion={motionStats} maxSpeed={maxSpeed} />
     </section>
     <section className="ride-record grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">

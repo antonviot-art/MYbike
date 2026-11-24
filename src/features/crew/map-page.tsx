@@ -26,6 +26,14 @@ type NearbyPlace = { lat: number; lng: number; label: string; color: string; cat
 export function MapPage() {
   const { records, add, remove, user, sharing, setSharing, positionClock, aerial, setAerial } = useCrew();
   const [focus, setFocus] = useState(0);
+  const [devicePosition, setDevicePosition] = useState<{ lat: number; lng: number; accuracy: number }>();
+  useEffect(() => {
+    let active = true;
+    navigator.geolocation?.getCurrentPosition(({ coords }) => {
+      if (active) setDevicePosition({ lat: coords.latitude, lng: coords.longitude, accuracy: coords.accuracy });
+    }, () => {}, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
+    return () => { active = false; };
+  }, []);
   const [points, setPoints] = useState<Point[]>([]);
   const [mode, setMode] = useState<'draw' | 'mark'>();
   const [pin, setPin] = useState<Point>();
@@ -43,6 +51,8 @@ export function MapPage() {
   const lat = (Math.round(viewport.lat / step) * step).toFixed(5);
   const lng = (Math.round(viewport.lng / step) * step).toFixed(5);
   const showPlaces = hasPlaces && viewport.zoom >= 10;
+  const sharedPosition = sharing && user ? livePilots(records.filter(record => record.author_id === user.id), positionClock)[0] : undefined;
+  const ownPosition = sharedPosition ?? devicePosition;
   const markers = [
     ...(!user && (category === 'all' || category === 'parking') ? [{ lat: 48.065, lng: 6.863, label: 'Parking du lac · Démo', color: '#2563eb', category: 'parking', live: false }] : []),
     ...records.filter(record => record.kind === 'marker' && (category === 'all' || (record.payload['category'] ?? 'other') === category)).map(record => ({
@@ -59,8 +69,7 @@ export function MapPage() {
       return point ? [{ lat: point[0], lng: point[1], label: String(record.payload['title']), live: false, color: '#dc2626', category: 'rasso', url: '/rasso?id=' + encodeURIComponent(record.id) }] : [];
     }) : []),
     ...livePilots(records, positionClock, user?.id),
-    ...(sharing && user ? livePilots(records.filter(record => record.author_id === user.id), positionClock)
-      .map(marker => ({ ...marker, current: true, label: 'Ta position' })) : []),
+    ...(ownPosition ? [{ ...ownPosition, live: true, current: true, label: 'Ta position' }] : []),
     ...(showPlaces ? nearby : []).filter(place => category === 'all' || place.category === category).map(place => ({ ...place, live: false })),
   ];
   const sharedPaths = category === 'all' ? records.filter(record => record.kind === 'ride-track' && record.payload['communityTrail'] === true).map(record => ({
@@ -143,7 +152,7 @@ export function MapPage() {
       <section className="map-screen" aria-label="Carte des sorties">
         <ClientOnly fallback={<div className="map-canvas bg-secondary grid place-items-center">Chargement de la carte…</div>}>
           <Suspense fallback={<div className="map-canvas bg-secondary" />}>
-            <MapView points={category === 'location' && !mode ? noPoints : points} markers={markers} paths={sharedPaths} focus={focus} onCenter={(lat, lng, zoom) => setViewport({ lat, lng, zoom })} onPoint={(lat, lng) => {
+            <MapView points={category === 'location' && !mode ? noPoints : points} markers={markers} paths={sharedPaths} focus={focus} initialPosition={devicePosition} onCenter={(lat, lng, zoom) => setViewport({ lat, lng, zoom })} onPoint={(lat, lng) => {
               if (mode === 'draw') setPoints(current => [...current, [lat, lng]]);
               if (mode === 'mark') { setPin([lat, lng]); setMode(undefined); }
             }} />
