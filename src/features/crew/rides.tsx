@@ -130,7 +130,7 @@ function TrackCard({ record, authors }: { record: CrewRecord; authors: boolean }
     if (!name) return;
     setBusy(true);
     try {
-      if (user) {
+      if (user && payload['visibility'] !== 'private') {
         if (name !== title || next !== description) {
           await socialCall('mybike_ride_edit', { ride_id: record.id, ride_name: name, ride_description: next });
           await refresh();
@@ -178,7 +178,7 @@ function TrackCard({ record, authors }: { record: CrewRecord; authors: boolean }
     <div className="mt-3 flex flex-wrap gap-2">
       <Button asChild size="sm"><Link to="/parcours/$rideId" params={{ rideId: record.id }}><Route /> Refaire ce parcours</Link></Button>
       <RideFavorite rideId={record.id} />
-      {author && <Button variant="outline" size="sm" onClick={share}><Share2 /> Partager</Button>}
+      {author && payload['visibility'] !== 'private' && <Button variant="outline" size="sm" onClick={share}><Share2 /> Partager</Button>}
       {editable && <Button variant="outline" size="sm" onClick={() => setMode(mode === 'edit' ? undefined : 'edit')}>Modifier</Button>}
       {editable && <Button variant="ghost" size="sm" onClick={() => setMode(mode === 'delete' ? undefined : 'delete')}>Supprimer</Button>}
     </div>
@@ -220,7 +220,7 @@ function RideRecorder() {
   const rides = records.filter(record => record.kind === 'ride-track').slice().reverse();
   const myRides = rides.filter(ride => user ? ride.author_id === user.id : /^[0-9a-f-]{36}$/i.test(ride.id));
   const query = place.trim().toLocaleLowerCase('fr');
-  const matching = rides.filter(ride => (!terrain || ride.payload['terrain'] === terrain)
+  const matching = rides.filter(ride => ride.payload['visibility'] !== 'private' && (!terrain || ride.payload['terrain'] === terrain)
     && (!difficultyFilter || String(rideDifficulty(ride, records)) === difficultyFilter)
     && (!query || [ride.payload['place'], ride.payload['name'], ride.payload['description']].some(value =>
       String(value ?? '').toLocaleLowerCase('fr').includes(query))));
@@ -259,12 +259,13 @@ function RideRecorder() {
     if (!title) return;
     setSaving(true);
     try {
-      await add('ride-track', { name: title, description, pilot: name, ...(vehicle ? { vehicleId: vehicle.id } : {}), place: String(form.get('place') ?? '').trim(),
+      const visibility = form.get('visibility') === 'public' ? 'public' : 'private';
+      await add('ride-track', { visibility, name: title, description, pilot: name, ...(vehicle ? { vehicleId: vehicle.id } : {}), place: String(form.get('place') ?? '').trim(),
         difficulty: readDifficulty(form.get('difficulty')) ? Number(form.get('difficulty')) : null,
         terrain: terrains.find(item => item === form.get('terrain')), communityTrail: form.has('communityTrail'), segments: draft.segments, distance: draft.distance, duration: draft.duration, motion: draft.motion, maxSpeed: draft.maxSpeed, stops: draft.stops });
       draft.clear();
       target.reset();
-      toast.success(user ? 'Parcours partagé sur ton profil.' : 'Parcours ajouté à cette démo.');
+      toast.success(visibility === 'private' ? 'Parcours privé enregistré sur cet appareil.' : user ? 'Parcours partagé sur ton profil.' : 'Parcours ajouté à cette démo.');
     } catch {
       toast.error('Le parcours n’a pas été partagé. Le brouillon est conservé.');
     } finally { setSaving(false); }
@@ -354,9 +355,10 @@ function RideRecorder() {
         <textarea name="description" aria-label="Description du parcours" placeholder="Description (facultative)" maxLength={600} />
         <label className="grid gap-1">Lieu<input name="place" placeholder="Commune, département ou région" maxLength={100} /></label>
         <label className="grid gap-1">Terrain<select name="terrain"><option value="">Choisir un terrain</option>{terrains.map(item => <option key={item}>{item}</option>)}</select></label>
+        <label className="grid gap-1">Visibilité<select name="visibility"><option value="private">Privé · sur cet appareil</option><option value="public">Public sur MYbike</option></select></label>
         <label className="grid gap-1">Difficulté estimée<select name="difficulty"><DifficultyOptions placeholder="Non renseignée" /></select></label>
         <label className="flex items-start gap-2 text-sm"><input type="checkbox" name="communityTrail" /> Afficher cette trace en bleu sur la carte communautaire si elle correspond à un chemin praticable absent du fond de carte.</label>
-        <Button disabled={saving} className="justify-self-start"><Share2 />{saving ? 'Partage…' : user ? 'Partager le parcours' : 'Partager dans la démo'}</Button>
+        <Button disabled={saving} className="justify-self-start"><Share2 />{saving ? 'Enregistrement…' : 'Enregistrer le parcours'}</Button>
       </form>}
       {!draft.recording && draft.segments.length > 0 && !canSave && <p className="text-sm text-muted-foreground">Reprends l’enregistrement et avance à l’extérieur pour obtenir une trace partageable.</p>}
     </section>

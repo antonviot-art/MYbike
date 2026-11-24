@@ -10,23 +10,23 @@ import { DifficultyBadge, RideFavorite, RideStats, TrackMap } from './rides';
 import { metersFromRoute, readSegments, readStops, type TrackPoint } from './tracks';
 import type { CrewRecord } from './data';
 
-export function RideDetailPage({ rideId }: { rideId: string }) {
+export function RideDetailPage({ rideId, start = false }: { rideId: string; start?: boolean }) {
   const { records, loading } = useCrew();
   const ride = records.find(record => record.id === rideId && record.kind === 'ride-track');
   const photos = records.filter(record => record.kind === 'media' && record.payload['rideId'] === rideId && !record.payload['video']);
   return <CrewShell tab="Parcours">
     <div className="mx-auto grid max-w-5xl gap-4">
       <Button asChild variant="outline" size="icon" className="rounded-full"><Link to="/parcours" aria-label="Retour aux parcours"><ArrowLeft /></Link></Button>
-      {ride ? <RideDetail key={ride.id} ride={ride} photos={photos} /> : <p>{loading ? 'Chargement du parcours…' : 'Ce parcours est introuvable. Connecte-toi si un pilote te l’a partagé.'}</p>}
+      {ride ? <RideDetail key={ride.id} ride={ride} photos={photos} start={start} /> : <p>{loading ? 'Chargement du parcours…' : 'Ce parcours est introuvable. Connecte-toi si un pilote te l’a partagé.'}</p>}
     </div>
   </CrewShell>;
 }
 
-function RideDetail({ ride, photos }: { ride: CrewRecord; photos: CrewRecord[] }) {
+function RideDetail({ ride, photos, start }: { ride: CrewRecord; photos: CrewRecord[]; start: boolean }) {
   const { payload } = ride;
   const segments = useMemo(() => readSegments(payload['segments']), [payload]);
   const stops = useMemo(() => readStops(payload['stops']), [payload]);
-  const [following, setFollowing] = useState(false);
+  const [following, setFollowing] = useState(start && segments.length > 0);
   const [downloadingMap, setDownloadingMap] = useState(false);
   const title = String(payload['name'] ?? 'Parcours');
   const [position, setPosition] = useState<{ point: TrackPoint; accuracy: number }>();
@@ -71,7 +71,7 @@ function RideDetail({ ride, photos }: { ride: CrewRecord; photos: CrewRecord[] }
       </header>
       {Boolean(payload['description']) && <p className="whitespace-pre-wrap break-words">{String(payload['description'])}</p>}
       <div className="flex flex-wrap items-center gap-2"><DifficultyBadge ride={ride} /><RideFavorite rideId={ride.id} /></div>
-      <h3 className="text-lg font-semibold">Bilan de sortie</h3>
+      <h3 className="text-lg font-semibold">{payload['planned'] === true ? 'Trajet prévu' : 'Bilan de sortie'}</h3>
       <RideStats distance={Number(payload['distance']) || 0} duration={Number(payload['duration']) || 0} motion={motionStats} maxSpeed={maxSpeed} />
     </section>
     <section className="ride-record grid gap-4">
@@ -94,6 +94,7 @@ function RideDetail({ ride, photos }: { ride: CrewRecord; photos: CrewRecord[] }
           finally { setDownloadingMap(false); }
         }}><Download /> {downloadingMap ? 'Préparation…' : 'Carte hors connexion'}</Button>
       </div>
+      {Array.isArray(payload['directions']) && <details><summary className="cursor-pointer">Directions de l’itinéraire</summary><ol className="mt-2 list-decimal space-y-1 pl-5">{payload['directions'].filter(step => typeof step === 'string').map((step, index) => <li key={index}>{step}</li>)}</ol></details>}
       <TrackMap segments={segments} stops={stops} photoMarkers={photoMarkers} position={following ? position : undefined} follow={following} />
       {(following || error) && <p role="status" className="text-sm text-muted-foreground">
         {error || (!position ? 'Recherche de ta position…' : distanceToRoute === undefined || !Number.isFinite(distanceToRoute)
@@ -106,7 +107,7 @@ function RideDetail({ ride, photos }: { ride: CrewRecord; photos: CrewRecord[] }
     <section className="ride-record grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-lg font-semibold">Photos de la sortie</h3>
-        <Button asChild variant="outline"><Link to="/medias" search={{ ride: ride.id }}><ImagePlus /> Ajouter des photos</Link></Button>
+        {payload['visibility'] !== 'private' && <Button asChild variant="outline"><Link to="/medias" search={{ ride: ride.id }}><ImagePlus /> Ajouter des photos</Link></Button>}
       </div>
       {photos.length ? <div className="media-grid">{photos.map(photo => <RidePhoto key={photo.id} photo={photo} />)}</div>
         : <p className="text-muted-foreground">Aucune photo associée à ce parcours.</p>}

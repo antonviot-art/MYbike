@@ -108,7 +108,7 @@ function MediaGallery({ initialRide, initialPost }: { initialRide: string | unde
       author: String(record.payload['author'] || 'Pilote'), path }];
   }).reverse() : [], [records, user]);
 
-  const rides = records.filter(record => record.kind === 'ride-track').slice().reverse();
+  const rides = records.filter(record => record.kind === 'ride-track' && record.payload['visibility'] !== 'private').slice().reverse();
 
   const rideSegments = rides.find(ride => ride.id === rideId)?.payload['segments'];
   const photoRoute = useMemo(() => readSegments(rideSegments), [rideSegments]);

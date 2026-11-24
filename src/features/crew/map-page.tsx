@@ -1,12 +1,12 @@
 import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
-import { ClientOnly } from '@tanstack/react-router';
+import { ClientOnly, Link } from '@tanstack/react-router';
 import { ArrowRight, Layers, Navigation, Upload, MapPin, Route, LocateFixed, Signpost, Share2, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { CrewShell } from './shell';
 import { useCrew } from './context';
 import { readGpx } from './data';
-import { readSegments } from './tracks';
+import { maxRouteWaypoints, readSegments } from './tracks';
 import { livePilots } from './live-location';
 import type { RoutePreference, SuggestedRide } from './valhalla.server';
 import { toast } from 'sonner';
@@ -44,7 +44,9 @@ export function MapPage() {
   const [routeStart, setRouteStart] = useState<Point>();
   const [routeEnd, setRouteEnd] = useState<Point>();
   const [via, setVia] = useState<Point[]>([]);
-  const maxVia = 6;
+  const maxVia = maxRouteWaypoints;
+  const [savedOpen, setSavedOpen] = useState(false);
+  const [savingRoute, setSavingRoute] = useState(false);
   const [preference, setPreference] = useState<RoutePreference>('mixed');
   const [suggested, setSuggested] = useState<SuggestedRide>();
   const [routeBusy, setRouteBusy] = useState(false);
@@ -86,10 +88,10 @@ export function MapPage() {
   ];
   const routeMarkers = [
     ...(routeStart ? [{ lat: routeStart[0], lng: routeStart[1], label: 'Départ', category: 'other', color: '#15803d' }] : []),
-    ...via.map(([lat, lng], index) => ({ lat, lng, label: 'Passage ' + (index + 1), badge: String(index + 1), color: '#2563eb' })),
+    ...via.map(([lat, lng], index) => ({ lat, lng, label: 'Passage ' + (index + 1), badge: String(index + 1), color: '#2563eb', onRemove: () => removePassage(index) })),
     ...(routeEnd ? [{ lat: routeEnd[0], lng: routeEnd[1], label: 'Destination', category: 'rasso', color: '#dc2626' }] : []),
   ];
-  const sharedPaths = category === 'all' ? records.filter(record => record.kind === 'ride-track' && record.payload['communityTrail'] === true).map(record => ({
+  const sharedPaths = category === 'all' ? records.filter(record => record.kind === 'ride-track' && record.payload['visibility'] !== 'private' && record.payload['communityTrail'] === true).map(record => ({
     label: 'Chemin partagé par ' + String(record.payload['pilot'] || 'un pilote'), segments: readSegments(record.payload['segments']),
   })).filter(path => path.segments.length) : [];
   const sharedRoutes = records.filter(record => record.kind === 'route');
@@ -144,6 +146,34 @@ export function MapPage() {
       request.abort();
     };
   }, [category, lat, lng, radius, showPlaces]);
+
+  const savedRoutes = records.filter(record => record.kind === 'ride-track' && record.payload['planned'] === true
+    && (user ? record.author_id === user.id : !record.author_id)).reverse();
+
+  function removePassage(index: number) {
+    if (routeBusy) return;
+    setVia(current => current.filter((_, position) => position !== index));
+    setSuggested(undefined);
+    setRouteError('');
+  }
+
+  async function saveItinerary(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!suggested || savingRoute) return;
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get('name') ?? '').trim();
+    if (!name) return;
+    setSavingRoute(true);
+    try {
+      const visibility = form.get('visibility') === 'public' ? 'public' : 'private';
+      await add('ride-track', { name, planned: true, visibility, segments: [suggested.points],
+        distance: suggested.km * 1000, duration: suggested.seconds * 1000, directions: suggested.directions });
+      setRouteOpen(false);
+      setSavedOpen(true);
+      toast.success('Itinéraire enregistré.');
+    } catch { toast.error('L’itinéraire n’a pas pu être enregistré.'); }
+    finally { setSavingRoute(false); }
+  }
 
   async function calculateRoute() {
     const start = routeStart ?? (devicePosition ? [devicePosition.lat, devicePosition.lng] : undefined);
@@ -239,8 +269,9 @@ export function MapPage() {
             <Button size="icon" variant={mode === 'route-via' ? 'default' : 'secondary'} aria-pressed={mode === 'route-via'}
               title="Ajouter des points de passage" aria-label="Ajouter des points de passage" disabled={routeBusy || via.length >= maxVia}
               onClick={() => setMode(mode === 'route-via' ? undefined : 'route-via')}><MapPin /></Button>
+            <Button size="icon" variant="secondary" title="Itinéraires enregistrés" aria-label="Itinéraires enregistrés" onClick={() => { setMode(undefined); setSavedOpen(true); }}><Route /></Button>
             {via.length > 0 && <Button size="icon" variant="secondary" title="Retirer le dernier point" aria-label="Retirer le dernier point"
-              disabled={routeBusy} onClick={() => { setVia(current => current.slice(0, -1)); setSuggested(undefined); setRouteError(''); }}><Undo2 /></Button>}
+              disabled={routeBusy} onClick={() => removePassage(via.length - 1)}><Undo2 /></Button>}
           </>}
           {locating && <>
           <Button size="icon" variant="secondary" title="Importer GPX" asChild><label className="cursor-pointer">
@@ -311,11 +342,27 @@ export function MapPage() {
             {suggested && <>
               <p className="font-semibold">{suggested.km.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km · {Math.max(1, Math.round(suggested.seconds / 60))} min</p>
               <Button variant="outline" onClick={() => setRouteOpen(false)}>Voir sur la carte</Button>
+              <form className="grid gap-2 rounded-lg border border-border p-3" onSubmit={saveItinerary}>
+                <label className="grid gap-1">Nom du trajet<input name="name" maxLength={80} required placeholder="Sortie du samedi" /></label>
+                <label className="grid gap-1">Visibilité<select name="visibility"><option value="private">Privé · sur cet appareil</option><option value="public">Public sur MYbike</option></select></label>
+                <Button disabled={savingRoute}>{savingRoute ? 'Enregistrement…' : 'Enregistrer pour plus tard'}</Button>
+              </form>
               <ol className="grid list-decimal gap-1 pl-5">{suggested.directions.map((step, index) => <li key={index}>{step}</li>)}</ol>
             </>}
             <p className="text-xs text-muted-foreground">En mode Chemins privilégiés, Valhalla peut choisir la route. La punaise au bord de la carte permet de placer tes passages sur les chemins ouverts aux motos.</p>
             <p className="text-xs text-muted-foreground">Calcul Valhalla · FOSSGIS · <a className="underline" href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a></p>
           </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={savedOpen} onOpenChange={setSavedOpen}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto">
+          <DialogTitle>Itinéraires enregistrés</DialogTitle>
+          <DialogDescription>Choisis un trajet pour suivre sa trace avec le GPS.</DialogDescription>
+          {savedRoutes.length ? <ul className="grid gap-3">{savedRoutes.map(ride => <li key={ride.id} className="grid gap-2 rounded-lg border border-border p-3">
+            <strong>{String(ride.payload['name'] ?? 'Itinéraire')}</strong>
+            <span className="text-sm text-muted-foreground">{ride.payload['visibility'] === 'private' ? 'Privé · sur cet appareil' : 'Public sur MYbike'}</span>
+            <Button asChild size="sm"><Link to="/parcours/$rideId" params={{ rideId: ride.id }} search={{ start: true }}>Lancer l’itinéraire</Link></Button>
+          </li>)}</ul> : <p>Aucun trajet enregistré.</p>}
         </DialogContent>
       </Dialog>
       <Dialog open={Boolean(pin)} onOpenChange={open => { if (!open) setPin(undefined); }}>

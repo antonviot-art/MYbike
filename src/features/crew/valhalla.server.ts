@@ -1,12 +1,10 @@
-import { metersBetween, readSegments, type TrackPoint } from './tracks';
+import { maxRouteWaypoints, metersBetween, readSegments, type TrackPoint } from './tracks';
 
 const profiles = {
   road: { use_trails: 0, use_tracks: 0, use_highways: 0.5 },
   mixed: { use_trails: 0.5, use_tracks: 0.5, use_highways: 0.2 },
   trails: { use_trails: 1, use_tracks: 1, use_highways: 0 },
 } as const;
-
-export const maxPassagePoints = 6;
 
 export type RoutePreference = keyof typeof profiles;
 export type SuggestedRide = { points: TrackPoint[]; km: number; seconds: number; directions: string[] };
@@ -54,12 +52,12 @@ export async function routingResponse(request: Request) {
   let input: { start?: unknown; end?: unknown; preference?: unknown; via?: unknown };
   try {
     const body = await request.text();
-    if (body.length > 1024) return reply({ error: 'input' }, 400);
+    if (body.length > 4096) return reply({ error: 'input' }, 400);
     input = JSON.parse(body);
     if (!input || typeof input !== 'object') return reply({ error: 'input' }, 400);
   } catch { return reply({ error: 'input' }, 400); }
   const via = input.via ?? [];
-  if (!Array.isArray(via) || via.length > maxPassagePoints) return reply({ error: 'input' }, 400);
+  if (!Array.isArray(via) || via.length > maxRouteWaypoints) return reply({ error: 'input' }, 400);
   const [locations] = readSegments([[input.start, ...via, input.end]]);
   const preference = input.preference as RoutePreference;
   if (!locations || !Object.hasOwn(profiles, preference)) return reply({ error: 'input' }, 400);

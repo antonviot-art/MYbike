@@ -1,10 +1,11 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { demoRecords, type CrewRecord } from './data';
 import { toast } from 'sonner';
 import { useLiveLocation } from './live-location';
 type Crew = { favoriteRides: string[]; toggleRideFavorite: (rideId: string) => void; records:CrewRecord[]; user:User|null; name:string; firstName:string; aerial:boolean; setAerial:(enabled:boolean)=>void; sharing:boolean; setSharing:(enabled:boolean)=>void; positionClock:number; add:(kind:string,payload:Record<string,unknown>)=>Promise<void>; update:(id:string,payload:Record<string,unknown>)=>Promise<void>; remove:(id:string)=>Promise<void>; upload:(file:Blob,extension:string,folder?:string)=>Promise<string>; refresh:()=>Promise<void>; loading:boolean };
+const emptyRecords: CrewRecord[] = [];
 const CrewContext=createContext<Crew|null>(null);
 export function CrewProvider({children}:{children:ReactNode}) {
  const [user,setUser]=useState<User|null>(null); const [demo,setDemo]=useState(demoRecords); const [cloud,setCloud]=useState<{userId:string;items:CrewRecord[]}>(); const [name,setName]=useState('Vous'); const [loading,setLoading]=useState(false);
@@ -52,7 +53,21 @@ export function CrewProvider({children}:{children:ReactNode}) {
    } catch { /* Sharing stays off. */ }
  }, [userId]);
  const positionClock = useLiveLocation(userId, displayName, sharing, stopSharing);
- const records = userId ? (cloud?.userId === userId ? cloud.items : []) : demo;
+ const privateKey = 'mybike:private-rides:' + (userId ?? 'demo');
+ const [privateRoutes, setPrivateRoutes] = useState<{ key: string; items: CrewRecord[] }>();
+ const localRoutes = privateRoutes?.key === privateKey ? privateRoutes.items : emptyRecords;
+ useEffect(() => {
+   try {
+     const items: unknown = JSON.parse(localStorage.getItem(privateKey) ?? '[]');
+     setPrivateRoutes({ key: privateKey, items: Array.isArray(items) ? items : [] });
+   } catch { setPrivateRoutes({ key: privateKey, items: [] }); }
+ }, [privateKey]);
+ function savePrivateRoutes(items: CrewRecord[]) {
+   localStorage.setItem(privateKey, JSON.stringify(items));
+   setPrivateRoutes({ key: privateKey, items });
+ }
+ const communityRecords = userId ? (cloud?.userId === userId ? cloud.items : emptyRecords) : demo;
+ const records = useMemo(() => [...communityRecords, ...localRoutes], [communityRecords, localRoutes]);
  const refresh = useCallback(async () => {
    if (!userId) return;
    const { data, error } = await supabase.from('group_records').select('id,kind,payload,author_id').order('created_at').order('id');
@@ -81,6 +96,10 @@ export function CrewProvider({children}:{children:ReactNode}) {
  }
 
  async function add(kind: string, payload: Record<string, unknown>) {
+   if (kind === 'ride-track' && payload['visibility'] === 'private') {
+     savePrivateRoutes([...localRoutes, { id: crypto.randomUUID(), kind, payload, ...(userId ? { author_id: userId } : {}) }]);
+     return;
+   }
    if (!userId) {
      changeRecords(items => [...items, { id: crypto.randomUUID(), kind, payload }]);
      return;
@@ -92,6 +111,10 @@ export function CrewProvider({children}:{children:ReactNode}) {
  }
 
  async function update(id: string, payload: Record<string, unknown>) {
+   if (localRoutes.some(item => item.id === id)) {
+     savePrivateRoutes(localRoutes.map(item => item.id === id ? { ...item, payload } : item));
+     return;
+   }
    if (userId) {
      const { error } = await supabase.from('group_records').update({ payload: JSON.parse(JSON.stringify(payload)) }).eq('id', id).select('id').single();
      if (error) throw error;
@@ -99,6 +122,10 @@ export function CrewProvider({children}:{children:ReactNode}) {
    changeRecords(items => items.map(item => item.id === id ? { ...item, payload } : item));
  }
  async function remove(id: string) {
+   if (localRoutes.some(item => item.id === id)) {
+     savePrivateRoutes(localRoutes.filter(item => item.id !== id));
+     return;
+   }
    if (userId) {
      const { error } = await supabase.from('group_records').delete().eq('id', id).eq('author_id', userId).select('id').single();
      if (error) throw error;

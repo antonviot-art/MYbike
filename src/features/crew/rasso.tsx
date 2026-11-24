@@ -59,7 +59,7 @@ function RassoForm({ onSaved }: { onSaved: () => void }) {
   const [showMap, setShowMap] = useState(false);
   const [saving, setSaving] = useState(false);
   const [locating, setLocating] = useState(false);
-  const routes = records.filter(record => record.kind === 'ride-track');
+  const routes = records.filter(record => record.kind === 'ride-track' && record.payload['visibility'] !== 'private');
 
   function locate() {
     if (!navigator.geolocation) { toast.error('Position indisponible sur cet appareil.'); return; }
