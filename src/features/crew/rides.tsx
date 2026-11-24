@@ -98,7 +98,7 @@ export function RideFavorite({ rideId }: { rideId: string }) {
   const { favoriteRides, toggleRideFavorite } = useCrew();
   const saved = favoriteRides.includes(rideId);
   return <Button type="button" variant="outline" size="sm" aria-pressed={saved} onClick={() => toggleRideFavorite(rideId)}>
-    <Bookmark className={saved ? 'fill-current text-primary' : ''} />{saved ? 'Retirer de « À rouler »' : 'Ajouter à « À rouler »'}
+    <Bookmark className={saved ? 'fill-current text-primary' : ''} />{saved ? 'Retirer des favoris' : 'Ajouter aux favoris'}
   </Button>;
 }
 
@@ -218,6 +218,7 @@ function RideRecorder() {
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayout>('balanced');
   const [addingStop, setAddingStop] = useState(false);
   const [tab, setTab] = useState<'mine' | 'explore' | 'saved' | 'record' | 'loop'>('mine');
+  const browseMode = tab === 'mine' || tab === 'explore' || tab === 'saved';
   const [terrain, setTerrain] = useState('');
   const [difficultyFilter, setDifficultyFilter] = useState('');
   const [place, setPlace] = useState('');
@@ -291,13 +292,22 @@ function RideRecorder() {
   const duration = Math.floor(draft.duration / 60000) + ' min ' + (Math.floor(draft.duration / 1000) % 60) + ' s';
 
   return <div className="mx-auto grid max-w-5xl gap-6">
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" aria-label="Vues des parcours">
-      <Button variant={tab === 'mine' ? 'default' : 'outline'} aria-pressed={tab === 'mine'} onClick={() => setTab('mine')}>Mes parcours</Button>
-      <Button variant={tab === 'record' ? 'default' : 'outline'} aria-pressed={tab === 'record'} onClick={() => setTab('record')}>Enregistrer</Button>
-      <Button variant={tab === 'loop' ? 'default' : 'outline'} aria-pressed={tab === 'loop'} onClick={() => setTab('loop')}>Créer une boucle</Button>
-      <Button variant={tab === 'explore' ? 'default' : 'outline'} aria-pressed={tab === 'explore'} onClick={() => setTab('explore')}>Explorer les parcours</Button>
-      <Button variant={tab === 'saved' ? 'default' : 'outline'} aria-pressed={tab === 'saved'} onClick={() => setTab('saved')}><Bookmark /> À rouler</Button>
-    </div>
+    <nav className="grid gap-2" aria-label="Vues des parcours">
+      <div className="grid grid-cols-2 gap-1 rounded-xl bg-secondary p-1">
+        <Button variant={browseMode ? 'default' : 'ghost'} aria-pressed={browseMode} onClick={() => { if (!browseMode) setTab('mine'); }}><Route /> Parcours</Button>
+        <Button variant={!browseMode ? 'default' : 'ghost'} aria-pressed={!browseMode} onClick={() => { if (browseMode) setTab('record'); }}><Circle /> Enregistrer</Button>
+      </div>
+      <div className="flex flex-wrap gap-1" aria-label={browseMode ? 'Parcourir les sorties' : 'Choisir un enregistrement'}>
+        {browseMode ? <>
+          <Button size="sm" variant={tab === 'mine' ? 'secondary' : 'ghost'} aria-pressed={tab === 'mine'} onClick={() => setTab('mine')}>Mes parcours</Button>
+          <Button size="sm" variant={tab === 'explore' ? 'secondary' : 'ghost'} aria-pressed={tab === 'explore'} onClick={() => setTab('explore')}>Explorer</Button>
+          <Button size="sm" variant={tab === 'saved' ? 'secondary' : 'ghost'} aria-pressed={tab === 'saved'} onClick={() => setTab('saved')}><Bookmark /> Favoris</Button>
+        </> : <>
+          <Button size="sm" variant={tab === 'record' ? 'secondary' : 'ghost'} aria-pressed={tab === 'record'} onClick={() => setTab('record')}>Enregistrer un parcours</Button>
+          <Button size="sm" variant={tab === 'loop' ? 'secondary' : 'ghost'} aria-pressed={tab === 'loop'} onClick={() => setTab('loop')}>Créer une boucle</Button>
+        </>}
+      </div>
+    </nav>
     {dashboard && <section className="ride-dashboard" data-layout={dashboardLayout} aria-label="Tableau de bord du parcours" onKeyDown={event => { if (event.key === 'Escape') setDashboard(false); }}>
       <div className="ride-dashboard-stats">
         <div className="flex w-full flex-wrap items-center justify-between gap-2">
@@ -377,7 +387,7 @@ function RideRecorder() {
       <h2 className="text-xl font-semibold">Mes parcours</h2>
       <TrackList records={myRides} />
     </section> : tab === 'saved' ? <section className="grid gap-3">
-      <h2 className="text-xl font-semibold">À rouler</h2>
+      <h2 className="text-xl font-semibold">Favoris</h2>
       {rides.some(ride => favoriteRides.includes(ride.id)) ? <TrackList records={rides.filter(ride => favoriteRides.includes(ride.id))} authors />
         : <p className="text-muted-foreground">Ajoute un parcours à tes favoris pour le retrouver ici.</p>}
     </section> : tab === 'explore' ? <section className="grid gap-3">

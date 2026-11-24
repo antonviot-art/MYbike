@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Flag, Timer } from 'lucide-react';
+import { Flag, Gauge, Map, Timer, X } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
+import { TrackMap } from './rides';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { useCrew } from './context';
@@ -30,7 +32,7 @@ export function LapResults({ value }: { value: unknown }) {
 }
 
 export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boolean; onActive?: (active: boolean) => void; circuit?: CrewRecord }) {
-  const { add, user, name } = useCrew();
+  const { add, user, name, records } = useCrew();
   const circuitPoints = readSegments(circuit?.payload['segments'])[0];
   const checkpoints = circuitPoints ? [0.25, 0.5, 0.75].flatMap(fraction => {
     const point = circuitPoints[Math.floor((circuitPoints.length - 1) * fraction)];
@@ -42,6 +44,9 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
   const [remaining, setRemaining] = useState<number>();
   const [laps, setLaps] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
+  const [dashboard, setDashboard] = useState(false);
+  const [showMap, setShowMap] = useState(true);
+  const [clock, setClock] = useState(0);
   const draft = useTrackRecorder('mybike:circuit:' + (user?.id ?? 'demo') + ':' + (circuit?.id ?? 'new'), (point, timestamp, accuracy) => {
     if (accuracy > 18) return;
     const state = gate.current;
@@ -91,6 +96,13 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
     return () => { active = false; void lock?.release().catch(() => {}); };
   }, [counting]);
 
+  useEffect(() => {
+    if (!dashboard || !draft.recording) return;
+    setClock(Date.now());
+    const interval = window.setInterval(() => setClock(Date.now()), 200);
+    return () => window.clearInterval(interval);
+  }, [dashboard, draft.recording]);
+
   function arm() {
     if (active || blocked) return;
     if (!navigator.geolocation) { toast.error('GPS indisponible.'); return; }
@@ -133,12 +145,7 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
     finally { setSaving(false); }
   }
 
-  return <section className="ride-record grid gap-4">
-    <h2 className="text-xl font-semibold">Boucle chronométrée</h2>
-    <p className="text-sm text-muted-foreground">Place-toi près de la ligne de départ. Au lancement, le premier point GPS précis fixe la ligne. Un tour compte quand tu t’en éloignes puis reviens à proximité.</p>
-    <p className="text-sm text-muted-foreground">Garde MYbike au premier plan. Le suivi et la vibration peuvent s’interrompre si le téléphone se verrouille.</p>
-    {blocked && <p className="text-sm">Arrête ton enregistrement en cours pour lancer le chrono.</p>}
-    {remaining !== undefined ? <div className="flex items-center gap-3">
+  const controls = remaining !== undefined ? <div className="flex items-center gap-3">
       <strong role="status" className="text-3xl tabular-nums">{remaining} s</strong>
       <Button variant="outline" onClick={() => { window.clearInterval(timer.current); setRemaining(undefined); }}>Annuler</Button>
     </div> : draft.recording ? <div className="grid gap-2">
@@ -149,8 +156,45 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
         <option value={0}>Départ immédiat</option><option value={5}>5 secondes</option><option value={10}>10 secondes</option><option value={30}>30 secondes</option><option value={60}>1 minute</option><option value={120}>2 minutes</option><option value={300}>5 minutes</option>
       </select></label>
       <Button disabled={blocked || saving} onClick={arm}><Timer /> Démarrer le chrono</Button>
-    </div>}
+    </div>;
+  const personalHistory = circuit && user ? records.flatMap(record => record.kind === 'circuit-lap' && record.author_id === user.id && record.payload['circuitId'] === circuit.id
+    ? readLapTimes(record.payload['laps']) : []) : [];
+  if (circuit && user && circuit.author_id === user.id) personalHistory.push(...readLapTimes(circuit.payload['laps']));
+  const best = Math.min(...laps, ...personalHistory);
+  const currentLap = draft.recording && gate.current && clock > 0 ? Math.max(0, clock - gate.current.lastCrossing) : undefined;
+
+  return <section className="ride-record grid gap-4">
+    <h2 className="text-xl font-semibold">Boucle chronométrée</h2>
+    <p className="text-sm text-muted-foreground">Place-toi près de la ligne de départ. Le GPS détecte le retour pour chronométrer tes tours.</p>
+    <p className="text-sm text-muted-foreground">Garde MYbike au premier plan. Le suivi et la vibration peuvent s’interrompre si le téléphone se verrouille.</p>
+    {blocked && <p className="text-sm">Arrête ton enregistrement en cours pour lancer le chrono.</p>}
+    <Button variant="outline" className="justify-self-start" onClick={() => setDashboard(true)}><Gauge /> Ouvrir le compteur</Button>
+    {!dashboard && controls}
     <LapResults value={laps} />
+    <Dialog open={dashboard} onOpenChange={setDashboard}>
+      <DialogContent fullscreen hideCloseButton className="circuit-dashboard">
+        <header className="flex items-center justify-between gap-2">
+          <DialogTitle>Compteur de boucle</DialogTitle>
+          <DialogDescription className="sr-only">Vitesse GPS et chronos de tes tours</DialogDescription>
+          <Button size="icon" variant="ghost" aria-label="Fermer le compteur" onClick={() => setDashboard(false)}><X /></Button>
+        </header>
+        <div className="grid gap-1 rounded-xl bg-secondary p-4">
+          <span className="text-sm text-muted-foreground">Ton meilleur tour</span>
+          <strong className="text-4xl tabular-nums">{Number.isFinite(best) ? formatLap(best) : '—'}</strong>
+        </div>
+        <div className="circuit-dashboard-readout">
+          <div className="grid content-start gap-2">
+            <div className="flex items-baseline gap-2"><strong className="text-4xl tabular-nums">{draft.speed === undefined ? '—' : Math.round(draft.speed)}</strong><span>km/h</span></div>
+            <p className="text-sm">Tour en cours <strong className="tabular-nums">{currentLap === undefined ? '—' : formatLap(currentLap)}</strong></p>
+            <Button size="sm" variant="ghost" className="justify-self-start" aria-pressed={showMap} onClick={() => setShowMap(!showMap)}><Map /> {showMap ? 'Masquer la carte' : 'Afficher la carte'}</Button>
+          </div>
+          {showMap && <div className="circuit-mini-map"><TrackMap segments={circuitPoints ? [circuitPoints] : draft.segments} position={draft.position} /></div>}
+        </div>
+        {controls}
+        <LapResults value={laps} />
+        {!active && laps.length > 0 && <Button variant="outline" onClick={() => setDashboard(false)}>Fermer pour enregistrer les chronos</Button>}
+      </DialogContent>
+    </Dialog>
     {!active && laps.length > 0 && <form className="grid gap-2" onSubmit={save}>
       {!circuit && <><label className="grid gap-1 text-sm">Nom de la boucle<input required name="title" maxLength={80} /></label>
         {user && <label className="grid gap-1 text-sm">Visibilité<select name="visibility"><option value="private">Privée</option><option value="public">Publique sur MYbike</option></select></label>}</>}

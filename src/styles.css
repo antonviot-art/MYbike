@@ -368,3 +368,8 @@ input:focus, textarea:focus { outline: 1px solid var(--primary); }
   .ride-speed-digit > span { animation: ride-speed-roll 150ms ease-out; }
   @keyframes ride-speed-roll { from { transform: translateY(55%); opacity: .45; } to { transform: translateY(0); opacity: 1; } }
 }
+
+.circuit-dashboard { display: flex; flex-direction: column; gap: 16px; height: 100dvh; overflow-y: auto; padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+.circuit-dashboard-readout { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 10px; }
+.circuit-mini-map { width: clamp(120px, 36vw, 300px); overflow: hidden; border-radius: 12px; }
+.circuit-mini-map .track-map { height: clamp(112px, 21dvh, 210px); }
