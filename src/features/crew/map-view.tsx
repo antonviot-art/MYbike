@@ -3,9 +3,9 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useCrew } from './context';
 
-type Marker = { lat: number; lng: number; label: string; live?: boolean; current?: boolean; accuracy?: number; showName?: boolean };
+type Marker = { lat: number; lng: number; label: string; live?: boolean; current?: boolean; accuracy?: number; showName?: boolean; url?: string; color?: string };
 
-export default function MapView({ points, segments, markers, focus, focusGroup = false, follow = false, onPoint }: {
+export default function MapView({ points, segments, markers, focus, focusGroup = false, follow = false, onPoint, onCenter }: {
   points: [number, number][];
   segments?: [number, number][][];
   markers: Marker[];
@@ -13,6 +13,7 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
   focusGroup?: boolean;
   follow?: boolean;
   onPoint: (lat: number, lng: number) => void;
+  onCenter?: (lat: number, lng: number) => void;
 }) {
   const el = useRef<HTMLDivElement>(null);
   const { aerial } = useCrew();
@@ -20,6 +21,8 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
   const layer = useRef<L.LayerGroup>(null);
   const callback = useRef(onPoint);
   callback.current = onPoint;
+  const centerCallback = useRef(onCenter);
+  centerCallback.current = onCenter;
   const currentMarkers = useRef(markers);
   currentMarkers.current = markers;
   const followed = follow ? markers.find(marker => marker.current) : undefined;
@@ -32,6 +35,10 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
     map.current = instance;
     layer.current = L.layerGroup().addTo(instance);
     instance.on('click', event => callback.current(event.latlng.lat, event.latlng.lng));
+    instance.on('moveend', () => {
+      const center = instance.getCenter().wrap();
+      centerCallback.current?.(center.lat, center.lng);
+    });
     const resize = new ResizeObserver(() => instance.invalidateSize({ pan: false }));
     resize.observe(el.current);
     return () => { resize.disconnect(); instance.remove(); map.current = null; };
@@ -65,7 +72,8 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
     const liveColor = styles.getPropertyValue('--success').trim();
     for (const marker of markers) {
       if (!Number.isFinite(marker.lat) || !Number.isFinite(marker.lng)) continue;
-      const label = document.createElement('span');
+      const label = marker.url ? document.createElement('a') : document.createElement('span');
+      if (label instanceof HTMLAnchorElement && marker.url?.startsWith('/rasso?')) label.href = marker.url;
       label.textContent = marker.label;
       if (marker.current) {
         const center: L.LatLngTuple = [marker.lat, marker.lng];
@@ -73,7 +81,7 @@ export default function MapView({ points, segments, markers, focus, focusGroup =
         L.circleMarker(center, { radius: 8, color: 'white', fillColor: '#2563eb', fillOpacity: 1, weight: 3 }).bindPopup(label).addTo(group);
         continue;
       }
-      const options = { radius: 8, color: marker.live ? liveColor : color, fillOpacity: 0.7, weight: 3 };
+      const options = { radius: 8, color: marker.live ? liveColor : marker.color ?? color, fillOpacity: 0.7, weight: 3 };
       const dot = L.circleMarker([marker.lat, marker.lng], options).bindPopup(label).addTo(group);
       if (marker.showName) dot.bindTooltip(label.cloneNode(true) as HTMLElement, { direction: 'top', offset: [0, -8], permanent: true });
     }

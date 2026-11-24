@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Download, Images, MapPin, Play, Upload } from 'lucide-react';
+import { Download, Heart, Images, MapPin, MessageCircle, Play, Plus, Share2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { CrewShell } from './shell';
+import { Avatar, CrewShell } from './shell';
+import { Link } from '@tanstack/react-router';
 import { useCrew, resolveMedia } from './context';
 import { images } from './data';
 import { toast } from 'sonner';
@@ -23,6 +24,10 @@ type MediaItem = {
   description?: string;
   place?: string;
   gps?: TrackPoint | undefined;
+  author?: string | null | undefined;
+  authorName?: string;
+  link?: string | undefined;
+  storyUntil?: number;
 };
 
 const demo = [
@@ -41,31 +46,42 @@ function coordinates(value: unknown): TrackPoint | undefined {
   return undefined;
 }
 
-export function MediaPage({ initialRide }: { initialRide?: string | undefined }) {
-  const { user } = useCrew();
-  return <MediaGallery key={(user?.id ?? 'demo') + (initialRide ?? '')} initialRide={initialRide} />;
+function webLink(value: unknown) {
+  try {
+    const url = new URL(String(value ?? ''));
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : undefined;
+  } catch { return undefined; }
 }
 
-function MediaGallery({ initialRide }: { initialRide: string | undefined }) {
-  const { records, add, upload, user, refresh } = useCrew();
+export function MediaPage({ initialRide, initialPost }: { initialRide?: string | undefined; initialPost?: string | undefined }) {
+  const { user } = useCrew();
+  return <MediaGallery key={(user?.id ?? 'demo') + (initialRide ?? '') + (initialPost ?? '')} initialRide={initialRide} initialPost={initialPost} />;
+}
+
+function MediaGallery({ initialRide, initialPost }: { initialRide: string | undefined; initialPost: string | undefined }) {
+  const { records, add, upload, user, refresh, name } = useCrew();
   const [visibility, setVisibility] = useState('public');
   const [filter, setFilter] = useState('Toutes les sorties');
   const [sort, setSort] = useState('recent');
   const [selected, setSelected] = useState<MediaItem>();
   const [busy, setBusy] = useState(false);
   const [extra, setExtra] = useState<MediaItem[]>([]);
-  const [publishing, setPublishing] = useState(Boolean(initialRide));
+  const [publishing, setPublishing] = useState<'post' | 'story' | undefined>(initialRide ? 'post' : undefined);
   const [files, setFiles] = useState<File[]>([]);
+  const [now, setNow] = useState(Date.now);
+  const [openedLink, setOpenedLink] = useState(false);
   const rides = records.filter(record => record.kind === 'ride-track').slice().reverse();
 
   useEffect(() => {
     let active = true;
     const media = records.filter(record => record.kind === 'media');
-    void Promise.allSettled(media.map(async ({ id, payload }): Promise<MediaItem> => ({
+    void Promise.allSettled(media.map(async ({ id, payload, author_id }): Promise<MediaItem> => ({
       id, url: await resolveMedia(String(payload['preview'])), original: String(payload['original']),
       title: String(payload['title']), date: String(payload['date']), session: String(payload['session']),
       video: Boolean(payload['video']), visibility: String(payload['visibility'] ?? 'public'),
       description: String(payload['description'] ?? ''), place: String(payload['place'] ?? ''), gps: coordinates(payload['gps']),
+      author: author_id, authorName: String(payload['authorName'] || 'Pilote'),
+      link: webLink(payload['link']), storyUntil: Number(payload['storyUntil']) || 0,
     }))).then(results => {
       if (active) setExtra(results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []));
     });
@@ -80,7 +96,18 @@ function MediaGallery({ initialRide }: { initialRide: string | undefined }) {
     return () => window.clearInterval(timer);
   }, [user, refresh]);
 
-  const all = [...(user ? [] : demo), ...extra];
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    if (!initialPost || openedLink) return;
+    const match = extra.find(item => item.id === initialPost && (!item.storyUntil || item.storyUntil > now));
+    if (match) { setSelected(match); setOpenedLink(true); }
+  }, [initialPost, openedLink, extra, now]);
+
+  const stories = extra.filter(item => (item.storyUntil ?? 0) > now).slice().reverse();
+  const all = [...(user ? [] : demo), ...extra.filter(item => !item.storyUntil)];
   const items = all.filter(item => filter === 'Toutes les sorties' || item.session === filter)
     .sort((a, b) => sort === 'recent' ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date));
 
@@ -90,7 +117,11 @@ function MediaGallery({ initialRide }: { initialRide: string | undefined }) {
     const fields = new FormData(event.currentTarget);
     const description = String(fields.get('description') ?? '').trim();
     const place = String(fields.get('place') ?? '').trim();
-    const ride = rides.find(item => item.id === fields.get('ride'));
+    const rawLink = String(fields.get('link') ?? '').trim();
+    const link = webLink(rawLink);
+    if (rawLink && !link) { toast.error('Ajoute un lien qui commence par https://.'); return; }
+    const story = publishing === 'story';
+    const ride = story ? undefined : rides.find(item => item.id === fields.get('ride'));
     const includeGps = fields.has('gps');
     setBusy(true);
     try {
@@ -119,12 +150,14 @@ function MediaGallery({ initialRide }: { initialRide: string | undefined }) {
         await add('media', {
           original, preview, title: file.name, date: new Date().toISOString().slice(0, 10),
           session: ride ? String(ride.payload['name'] ?? 'Parcours') : 'Nouvelle sortie',
-          video, visibility, description, place, ...(gps ? { gps } : {}), ...(ride ? { rideId: ride.id } : {}),
+          video, visibility, description, place, authorName: name, ...(gps ? { gps } : {}),
+          ...(ride ? { rideId: ride.id } : {}), ...(link ? { link } : {}),
+          ...(story ? { storyUntil: Date.now() + 86400000 } : {}),
         });
         setFiles(pending => pending.filter(item => item !== file));
       }
-      setPublishing(false);
-      toast.success('Médias publiés.');
+      setPublishing(undefined);
+      toast.success(story ? 'Story publiée pour 24 heures.' : 'Publication ajoutée.');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Impossible de publier les médias.');
     } finally { setBusy(false); }
@@ -146,11 +179,21 @@ function MediaGallery({ initialRide }: { initialRide: string | undefined }) {
   }
 
   return <CrewShell tab="Médias">
-    <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-      <h2 className="flex items-center gap-2 font-semibold"><Images className="text-primary" /> L’album du groupe · {items.length} souvenirs</h2>
-      <Button onClick={() => setPublishing(true)}><Upload /> Ajouter des médias</Button>
+    <div className="media-feed">
+    <section aria-label="Stories">
+      <h2 className="font-semibold">Stories</h2>
+      <div className="media-stories">
+        <button className="media-story-chip" onClick={() => { setFiles([]); setPublishing('story'); }}><span><Plus /></span><span>Ta story</span></button>
+        {stories.map(item => <button className="media-story-chip" key={item.id} onClick={() => setSelected(item)}>
+          <span>{item.video ? <video src={item.url} muted preload="metadata" /> : <img src={item.url} alt="" />}</span><span className="max-w-full truncate">{item.authorName}</span>
+        </button>)}
+      </div>
+    </section>
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <h2 className="flex items-center gap-2 font-semibold"><Images className="text-primary" /> Le fil MYbike</h2>
+      <Button onClick={() => { setFiles([]); setPublishing('post'); }}><Upload /> Publier</Button>
     </div>
-    <div className="mb-6 flex flex-wrap justify-between gap-3">
+    <div className="flex flex-wrap justify-between gap-3">
       <select aria-label="Filtrer par sortie" value={filter} onChange={event => setFilter(event.target.value)}>
         {['Toutes les sorties', ...new Set(all.map(item => item.session))].map(session => <option key={session}>{session}</option>)}
       </select>
@@ -158,25 +201,35 @@ function MediaGallery({ initialRide }: { initialRide: string | undefined }) {
         <option value="recent">Plus récentes</option><option value="old">Plus anciennes</option>
       </select>
     </div>
-    <div className="media-grid">{items.map(item => <article key={item.id}>
+    {!items.length && <p className="text-muted-foreground">Aucune publication pour le moment.</p>}
+    {items.map(item => <article key={item.id}>
+      <div className="mb-3 flex items-center gap-2">
+        <Avatar userId={item.author} pilot={(item.authorName || 'M').charAt(0).toUpperCase()} />
+        {item.author ? <Link to="/pilotes/$pilotId" params={{ pilotId: item.author }} className="font-semibold hover:underline">{item.authorName}</Link>
+          : <span className="font-semibold">{item.authorName || 'MYbike · Démo'}</span>}
+      </div>
       <Button variant="ghost" className="relative h-auto w-full overflow-hidden p-0" onClick={() => setSelected(item)} aria-label={'Voir ' + item.title}>
         {item.video ? <><video className="media-photo" src={item.url} /><Play className="absolute" /></> : <img src={item.url} alt={item.title} className="media-photo" />}
       </Button>
       <h3 className="mt-2 break-words text-sm font-semibold">{item.title}</h3>
       <p className="text-xs text-muted-foreground">{item.visibility === 'friends' && 'Amis seulement · '}{item.place || item.session} · {new Date(item.date).toLocaleDateString('fr-FR')}</p>
       {item.description && <p className="mt-1 line-clamp-2 text-sm">{item.description}</p>}
-    </article>)}</div>
-    <Dialog open={publishing} onOpenChange={open => { if (!busy) setPublishing(open); }}>
+      {item.link && <a className="mt-2 inline-block break-all text-sm underline" href={item.link} target="_blank" rel="noopener noreferrer">Ouvrir le lien</a>}
+      {item.visibility !== 'friends' && <MediaActions item={item} />}
+    </article>)}
+    </div>
+    <Dialog open={Boolean(publishing)} onOpenChange={open => { if (!open && !busy) setPublishing(undefined); }}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto">
-        <DialogTitle>Publier des médias</DialogTitle>
-        <DialogDescription>Ajoute une description et le lieu de la prise de vue.</DialogDescription>
+        <DialogTitle>{publishing === 'story' ? 'Ajouter une story' : 'Nouvelle publication'}</DialogTitle>
+        <DialogDescription>{publishing === 'story' ? 'Ta story reste dans le fil pendant 24 heures.' : 'Ajoute tes photos ou vidéos, et un lien si tu veux.'}</DialogDescription>
         <form className="grid gap-3" onSubmit={publish}>
           <label className="grid gap-1">Photos ou vidéos<input type="file" className="w-full" accept="image/*,video/*,.heic,.heif" multiple disabled={busy}
             onChange={event => setFiles(Array.from(event.target.files ?? []))} /></label>
           {files.length > 0 && <p className="text-sm text-muted-foreground">{files.length} fichier(s) à publier</p>}
           <label className="grid gap-1">Description<textarea name="description" rows={3} maxLength={600} /></label>
+          <label className="grid gap-1">Lien (facultatif)<input name="link" type="url" maxLength={500} placeholder="https://…" /></label>
           <label className="grid gap-1">Lieu (facultatif)<input name="place" maxLength={120} placeholder="Ex. Forêt de Clairvaux" /></label>
-          {rides.length > 0 && <label className="grid gap-1">Associer à un parcours
+          {publishing !== 'story' && rides.length > 0 && <label className="grid gap-1">Associer à un parcours
             <select name="ride" defaultValue={initialRide ?? ''}><option value="">Aucun parcours</option>
               {rides.map(ride => <option key={ride.id} value={ride.id}>{String(ride.payload['name'] ?? 'Parcours')}</option>)}
             </select>
@@ -195,10 +248,75 @@ function MediaGallery({ initialRide }: { initialRide: string | undefined }) {
         <DialogDescription>{selected.session}</DialogDescription>
         {selected.video ? <video src={selected.url} controls className="w-full max-h-[60vh]" /> : <img src={selected.url} alt={selected.title} className="w-full max-h-[60vh] object-contain" />}
         {selected.description && <p className="whitespace-pre-wrap break-words">{selected.description}</p>}
+        {selected.link && <a className="underline" href={selected.link} target="_blank" rel="noopener noreferrer">Ouvrir le lien</a>}
         {selected.place && <p className="flex items-center gap-2"><MapPin size={16} />{selected.place}</p>}
         {selected.gps && <a className="underline" href={'https://www.openstreetmap.org/?mlat=' + selected.gps[0] + '&mlon=' + selected.gps[1] + '#map=16/' + selected.gps[0] + '/' + selected.gps[1]}>Voir le lieu sur la carte</a>}
         <Button onClick={download}><Download /> Télécharger l’original</Button>
       </DialogContent>}
     </Dialog>
   </CrewShell>;
+}
+
+function MediaActions({ item }: { item: MediaItem }) {
+  const { records, add, user, name } = useCrew();
+  const [commenting, setCommenting] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [liking, setLiking] = useState(false);
+  const activity = records.filter(record => record.payload['post'] === item.id);
+  const likes = new Map<string, boolean>();
+  for (const record of activity) {
+    if (record.kind === 'media-like') likes.set(record.author_id ?? 'demo', record.payload['liked'] === true);
+  }
+  const liked = likes.get(user?.id ?? 'demo') === true;
+  const total = [...likes.values()].filter(Boolean).length;
+  const comments = activity.filter(record => record.kind === 'media-comment');
+
+  async function toggleLike() {
+    if (liking) return;
+    setLiking(true);
+    try { await add('media-like', { post: item.id, liked: !liked }); }
+    catch { toast.error('Le like n’a pas été enregistré.'); }
+    finally { setLiking(false); }
+  }
+
+  async function comment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const text = String(new FormData(form).get('comment') ?? '').trim();
+    if (!text || busy) return;
+    setBusy(true);
+    try { await add('media-comment', { post: item.id, text, name }); form.reset(); }
+    catch { toast.error('Le commentaire n’a pas été publié.'); }
+    finally { setBusy(false); }
+  }
+
+  async function share() {
+    const url = new URL('/medias', window.location.origin);
+    url.searchParams.set('post', item.id);
+    try {
+      if (navigator.share) await navigator.share({ title: item.title, url: url.href });
+      else { await navigator.clipboard.writeText(url.href); toast.success('Lien copié.'); }
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) toast.error('Le lien n’a pas pu être partagé.');
+    }
+  }
+
+  return <div className="mt-3 border-t border-border pt-2">
+    <div className="flex flex-wrap items-center gap-2">
+      <Button size="sm" variant="ghost" aria-pressed={liked} aria-label={liked ? 'Retirer le like' : 'Aimer'} disabled={liking} onClick={toggleLike}>
+        <Heart className={liked ? 'fill-primary text-primary' : ''} /> {total}
+      </Button>
+      <Button size="sm" variant="ghost" aria-label="Commentaires" aria-expanded={commenting} onClick={() => setCommenting(!commenting)}><MessageCircle /> {comments.length}</Button>
+      {user && <Button size="sm" variant="ghost" onClick={share}><Share2 /> Partager</Button>}
+    </div>
+    {commenting && <div className="grid gap-2 py-2">
+      {comments.map(record => <p key={record.id} className="break-words text-sm">
+        <strong>{String(record.payload['name'] || 'Pilote')}</strong> {String(record.payload['text'] || '')}
+      </p>)}
+      <form className="flex flex-wrap gap-2" onSubmit={comment}>
+        <input className="min-w-0 flex-1" name="comment" maxLength={400} placeholder="Un commentaire…" aria-label="Ton commentaire" required />
+        <Button size="sm" disabled={busy}>Envoyer</Button>
+      </form>
+    </div>}
+  </div>;
 }

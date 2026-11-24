@@ -330,3 +330,16 @@ input:focus, textarea:focus { outline: 1px solid var(--primary); }
 }
 
 .rasso-map .map-canvas { height: min(340px, 52vh); border-radius: 14px; }
+
+.map-categories { position: absolute; z-index: 2; top: 12px; left: 54px; max-width: calc(100% - 112px); }
+.map-categories select { max-width: 100%; padding: 7px 10px; box-shadow: 0 2px 8px var(--overlay); }
+.media-feed { display: grid; gap: 18px; max-width: 640px; margin-inline: auto; }
+.media-feed article { padding: 14px; border: 1px solid var(--border); border-radius: 20px; background: var(--secondary); }
+.media-feed .media-photo { aspect-ratio: 4 / 3; }
+.media-stories { display: flex; gap: 12px; overflow-x: auto; padding: 6px 2px; }
+.media-story-chip { display: grid; justify-items: center; gap: 5px; flex: none; max-width: 76px; color: var(--foreground); font-size: .8rem; }
+.media-story-chip > span:first-child { display: grid; place-items: center; width: 60px; height: 60px; border: 2px solid var(--primary); padding: 3px; border-radius: 50%; overflow: hidden; background: var(--card); }
+.media-story-chip img, .media-story-chip video { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+
+.map-categories { display: flex; flex-wrap: wrap; gap: 5px; }
+.map-screen:has(.map-share-tip) .map-categories { top: 62px; }
