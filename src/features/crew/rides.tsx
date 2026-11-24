@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ClientOnly, Link } from '@tanstack/react-router';
-import { Circle, Gauge, MapPin, Maximize, Route, Share2, Square, X } from 'lucide-react';
+import { Bookmark, Circle, Gauge, MapPin, Maximize, Route, Share2, Square, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { useCrew } from './context';
@@ -57,6 +57,14 @@ export function TrackMap({ segments, position, stops = [], follow = false, pilot
 export function TrackList({ records, authors = false }: { records: CrewRecord[]; authors?: boolean }) {
   if (!records.length) return <p className="text-muted-foreground">Aucun parcours partagé pour le moment.</p>;
   return <div className="grid gap-3">{records.map(record => <TrackCard key={record.id} record={record} authors={authors} />)}</div>;
+}
+
+export function RideFavorite({ rideId }: { rideId: string }) {
+  const { favoriteRides, toggleRideFavorite } = useCrew();
+  const saved = favoriteRides.includes(rideId);
+  return <Button type="button" variant="outline" size="sm" aria-pressed={saved} onClick={() => toggleRideFavorite(rideId)}>
+    <Bookmark className={saved ? 'fill-current text-primary' : ''} />{saved ? 'Retirer de « À rouler »' : 'Ajouter à « À rouler »'}
+  </Button>;
 }
 
 function TrackCard({ record, authors }: { record: CrewRecord; authors: boolean }) {
@@ -129,6 +137,7 @@ function TrackCard({ record, authors }: { record: CrewRecord; authors: boolean }
     {description && <p className="mt-2 whitespace-pre-wrap break-words">{description}</p>}
     <div className="mt-3 flex flex-wrap gap-2">
       <Button asChild size="sm"><Link to="/parcours/$rideId" params={{ rideId: record.id }}><Route /> Refaire ce parcours</Link></Button>
+      <RideFavorite rideId={record.id} />
       {author && <Button variant="outline" size="sm" onClick={share}><Share2 /> Partager</Button>}
       {editable && <Button variant="outline" size="sm" onClick={() => setMode(mode === 'edit' ? undefined : 'edit')}>Modifier</Button>}
       {editable && <Button variant="ghost" size="sm" onClick={() => setMode(mode === 'delete' ? undefined : 'delete')}>Supprimer</Button>}
@@ -151,7 +160,7 @@ export function RidesPage() {
 }
 
 function RideRecorder() {
-  const { user, name, records, add, positionClock, sharing, setSharing } = useCrew();
+  const { user, name, records, add, positionClock, sharing, setSharing, favoriteRides } = useCrew();
   const draft = useTrackRecorder('mybike:track:' + (user?.id ?? 'demo'));
   const [saving, setSaving] = useState(false);
   const [discard, setDiscard] = useState(false);
@@ -159,7 +168,7 @@ function RideRecorder() {
   const [focusPilots, setFocusPilots] = useState(false);
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayout>('balanced');
   const [addingStop, setAddingStop] = useState(false);
-  const [tab, setTab] = useState<'mine' | 'explore'>('mine');
+  const [tab, setTab] = useState<'mine' | 'explore' | 'saved'>('mine');
   const [terrain, setTerrain] = useState('');
   const [place, setPlace] = useState('');
   const canSave = draft.segments.some(segment => segment.length > 1);
@@ -229,6 +238,7 @@ function RideRecorder() {
     <div className="flex flex-wrap gap-2" aria-label="Vues des parcours">
       <Button variant={tab === 'mine' ? 'default' : 'outline'} aria-pressed={tab === 'mine'} onClick={() => setTab('mine')}>Mes parcours</Button>
       <Button variant={tab === 'explore' ? 'default' : 'outline'} aria-pressed={tab === 'explore'} onClick={() => setTab('explore')}>Explorer les parcours</Button>
+      <Button variant={tab === 'saved' ? 'default' : 'outline'} aria-pressed={tab === 'saved'} onClick={() => setTab('saved')}><Bookmark /> À rouler</Button>
     </div>
     {dashboard && <section className="ride-dashboard" data-layout={dashboardLayout} aria-label="Tableau de bord du parcours" onKeyDown={event => { if (event.key === 'Escape') setDashboard(false); }}>
       <div className="ride-dashboard-stats">
@@ -299,6 +309,10 @@ function RideRecorder() {
     {tab === 'mine' ? <section className="grid gap-3">
       <h2 className="text-xl font-semibold">Mes parcours</h2>
       <TrackList records={myRides} />
+    </section> : tab === 'saved' ? <section className="grid gap-3">
+      <h2 className="text-xl font-semibold">À rouler</h2>
+      {rides.some(ride => favoriteRides.includes(ride.id)) ? <TrackList records={rides.filter(ride => favoriteRides.includes(ride.id))} authors />
+        : <p className="text-muted-foreground">Ajoute un parcours à tes favoris pour le retrouver ici.</p>}
     </section> : <section className="grid gap-3">
       <h2 className="text-xl font-semibold">Parcours de la communauté</h2>
       <div className="flex flex-wrap gap-2">

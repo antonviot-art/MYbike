@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState, type FormEvent } from 'react';
 import { ClientOnly, Link } from '@tanstack/react-router';
-import { CalendarDays, LocateFixed, MapPin, Plus, Route, Share2 } from 'lucide-react';
+import { CalendarDays, ImagePlus, LocateFixed, MapPin, Plus, Route, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
@@ -220,9 +220,77 @@ function RassoCard({ event, highlighted }: { event: CrewRecord; highlighted: boo
       <summary className="cursor-pointer">Voir les réponses</summary>
       <ul className="mt-2 grid gap-1">{[...votes.entries()].map(([id, vote]) => <li key={id}>{vote.name} · {vote.answer}</li>)}</ul>
     </details>}
+    <RassoAlbum eventId={event.id} canContribute={Number.isFinite(when.getTime()) && when.getTime() <= Date.now() && (host || votes.get(viewer)?.answer === 'Présent')} />
     {host && (deleting ? <div className="flex flex-wrap gap-2">
       <Button variant="destructive" size="sm" disabled={busy} onClick={deleteEvent}>Confirmer la suppression</Button>
       <Button variant="ghost" size="sm" onClick={() => setDeleting(false)}>Annuler</Button>
     </div> : <Button className="justify-self-start" size="sm" variant="ghost" onClick={() => setDeleting(true)}>Supprimer le rasso</Button>)}
   </article>;
+}
+
+
+function RassoAlbum({ eventId, canContribute }: { eventId: string; canContribute: boolean }) {
+  const { records, name, add, upload } = useCrew();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const items = records.filter(record => record.kind === 'rasso-media' && record.payload['rassoId'] === eventId);
+
+  async function addMedia(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canContribute || busy) return;
+    const form = event.currentTarget;
+    const file = new FormData(form).get('file');
+    if (!(file instanceof File) || !file.size || file.size > 50 * 1024 * 1024) {
+      toast.error('Choisis un fichier de 50 Mo maximum.');
+      return;
+    }
+    const video = ['video/mp4', 'video/webm', 'video/quicktime'].includes(file.type);
+    if (!video && !['image/jpeg', 'image/png', 'image/webp', 'image/avif'].includes(file.type)) {
+      toast.error('Choisis une photo JPEG, PNG, WebP ou AVIF, ou une vidéo MP4, MOV ou WebM.');
+      return;
+    }
+    const extension = file.name.split('.').at(-1)?.match(/^[a-z\d]{1,8}$/i)?.[0] ?? (video ? 'mp4' : 'jpg');
+    setBusy(true);
+    try {
+      const path = await upload(file, extension, 'rasso-media');
+      await add('rasso-media', { rassoId: eventId, path, video, author: name });
+      form.reset();
+      toast.success('Souvenir ajouté à l’album.');
+    } catch { toast.error('Le fichier n’a pas pu être ajouté.'); }
+    finally { setBusy(false); }
+  }
+
+  return <details className="rounded-xl border border-border p-3" onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary className="cursor-pointer font-semibold">Album du rasso{items.length > 0 ? ' · ' + items.length : ''}</summary>
+    {open && <div className="mt-3 grid gap-3">
+      {items.length ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        {items.map(item => <RassoAlbumItem key={item.id} item={item} />)}
+      </div> : <p className="text-sm text-muted-foreground">Aucun souvenir pour le moment.</p>}
+      {canContribute ? <form className="grid gap-2" onSubmit={addMedia}>
+        <label className="grid gap-1 text-sm">Photo ou vidéo
+          <input type="file" name="file" accept="image/jpeg,image/png,image/webp,image/avif,video/mp4,video/webm,video/quicktime" disabled={busy} required />
+        </label>
+        <Button className="justify-self-start" size="sm" disabled={busy}><ImagePlus />{busy ? 'Envoi…' : 'Ajouter à l’album'}</Button>
+      </form> : <p className="text-sm text-muted-foreground">L’organisateur et les pilotes inscrits comme présents peuvent ajouter leurs souvenirs après le rendez-vous.</p>}
+    </div>}
+  </details>;
+}
+
+function RassoAlbumItem({ item }: { item: CrewRecord }) {
+  const [url, setUrl] = useState('');
+  const [failed, setFailed] = useState(false);
+  const path = String(item.payload['path'] ?? '');
+  const author = String(item.payload['author'] || 'Pilote');
+  useEffect(() => {
+    let active = true;
+    void resolveMedia(path).then(value => { if (active) setUrl(value); }).catch(() => { if (active) setFailed(true); });
+    return () => { active = false; };
+  }, [path]);
+  return <figure className="min-w-0">
+    {url ? item.payload['video'] === true
+      ? <video src={url} controls playsInline preload="metadata" className="w-full rounded-lg" />
+      : <a href={url} target="_blank" rel="noreferrer"><img src={url} loading="lazy" alt={'Photo de ' + author} className="w-full rounded-lg" /></a>
+      : <p className="text-sm text-muted-foreground">{failed ? 'Média indisponible' : 'Chargement…'}</p>}
+    <figcaption className="mt-1 break-words text-xs text-muted-foreground">{author}</figcaption>
+  </figure>;
 }

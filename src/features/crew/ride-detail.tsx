@@ -4,7 +4,7 @@ import { ArrowLeft, ImagePlus, LocateFixed, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { CrewShell } from './shell';
 import { resolveMedia, useCrew } from './context';
-import { RideStats, TrackMap } from './rides';
+import { RideFavorite, RideStats, TrackMap } from './rides';
 import { metersFromRoute, readSegments, readStops, type TrackPoint } from './tracks';
 import type { CrewRecord } from './data';
 
@@ -66,6 +66,7 @@ function RideDetail({ ride, photos }: { ride: CrewRecord; photos: CrewRecord[] }
         {ride.author_id && <Link to="/pilotes/$pilotId" params={{ pilotId: ride.author_id }} className="text-sm text-muted-foreground underline">{String(payload['pilot'] ?? 'Pilote')}</Link>}
       </header>
       {Boolean(payload['description']) && <p className="whitespace-pre-wrap break-words">{String(payload['description'])}</p>}
+      <div className="justify-self-start"><RideFavorite rideId={ride.id} /></div>
       <h3 className="text-lg font-semibold">Bilan de sortie</h3>
       <RideStats distance={Number(payload['distance']) || 0} duration={Number(payload['duration']) || 0} motion={motionStats} maxSpeed={maxSpeed} />
     </section>

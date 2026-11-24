@@ -1,10 +1,10 @@
-﻿import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { demoRecords, type CrewRecord } from './data';
 import { toast } from 'sonner';
 import { useLiveLocation } from './live-location';
-type Crew = { records:CrewRecord[]; user:User|null; name:string; firstName:string; aerial:boolean; setAerial:(enabled:boolean)=>void; sharing:boolean; setSharing:(enabled:boolean)=>void; positionClock:number; add:(kind:string,payload:Record<string,unknown>)=>Promise<void>; update:(id:string,payload:Record<string,unknown>)=>Promise<void>; remove:(id:string)=>Promise<void>; upload:(file:Blob,extension:string,folder?:string)=>Promise<string>; refresh:()=>Promise<void>; loading:boolean };
+type Crew = { favoriteRides: string[]; toggleRideFavorite: (rideId: string) => void; records:CrewRecord[]; user:User|null; name:string; firstName:string; aerial:boolean; setAerial:(enabled:boolean)=>void; sharing:boolean; setSharing:(enabled:boolean)=>void; positionClock:number; add:(kind:string,payload:Record<string,unknown>)=>Promise<void>; update:(id:string,payload:Record<string,unknown>)=>Promise<void>; remove:(id:string)=>Promise<void>; upload:(file:Blob,extension:string,folder?:string)=>Promise<string>; refresh:()=>Promise<void>; loading:boolean };
 const CrewContext=createContext<Crew|null>(null);
 export function CrewProvider({children}:{children:ReactNode}) {
  const [user,setUser]=useState<User|null>(null); const [demo,setDemo]=useState(demoRecords); const [cloud,setCloud]=useState<{userId:string;items:CrewRecord[]}>(); const [name,setName]=useState('Vous'); const [loading,setLoading]=useState(false);
@@ -20,6 +20,22 @@ export function CrewProvider({children}:{children:ReactNode}) {
    try { localStorage.setItem('mybike:map-style', enabled ? 'aerial' : 'streets'); } catch { /* Current setting still applies. */ }
  }
  const userId = user?.id;
+ const favoriteKey = 'mybike:favorite-rides:' + (userId ?? 'demo');
+ const [favorites, setFavorites] = useState<{ key: string; ids: string[] }>();
+ const favoriteRides = favorites?.key === favoriteKey ? favorites.ids : [];
+ useEffect(() => {
+   let ids: string[] = [];
+   try {
+     const saved: unknown = JSON.parse(localStorage.getItem(favoriteKey) ?? '[]');
+     if (Array.isArray(saved)) ids = saved.filter((id): id is string => typeof id === 'string');
+   } catch { /* Keep an empty list if local storage is unavailable. */ }
+   setFavorites({ key: favoriteKey, ids });
+ }, [favoriteKey]);
+ function toggleRideFavorite(rideId: string) {
+   const ids = favoriteRides.includes(rideId) ? favoriteRides.filter(id => id !== rideId) : [rideId, ...favoriteRides];
+   setFavorites({ key: favoriteKey, ids });
+   try { localStorage.setItem(favoriteKey, JSON.stringify(ids)); } catch { /* Keep the session list. */ }
+ }
  const displayName = firstName || (userId ? name : 'Vous');
  const [sharePreference, setSharePreference] = useState<{ userId: string; enabled: boolean }>();
  const sharing = Boolean(userId && sharePreference?.userId === userId && sharePreference.enabled);
@@ -90,7 +106,7 @@ export function CrewProvider({children}:{children:ReactNode}) {
    changeRecords(items => items.filter(item => item.id !== id));
  }
   async function upload(file:Blob,extension:string,folder?:string){if(!user)return URL.createObjectURL(file);const path=`${user.id}/${folder ? folder + '/' : ''}${crypto.randomUUID()}.${extension}`;const {error}=await supabase.storage.from('group-media').upload(path,file);if(error)throw error;return path;}
- return <CrewContext.Provider value={{records,user,name:displayName,firstName,aerial,setAerial,sharing,setSharing,positionClock,add,update,remove,upload,refresh,loading:!!userId && loading}}>{children}</CrewContext.Provider>;
+ return <CrewContext.Provider value={{favoriteRides,toggleRideFavorite,records,user,name:displayName,firstName,aerial,setAerial,sharing,setSharing,positionClock,add,update,remove,upload,refresh,loading:!!userId && loading}}>{children}</CrewContext.Provider>;
 }
 export function useCrew(){const value=useContext(CrewContext);if(!value)throw new Error('CrewProvider required');return value;}
 export async function resolveMedia(path:string){ if(path.startsWith('blob:')||path.startsWith('https:'))return path;const {data,error}=await supabase.storage.from('group-media').createSignedUrl(path,300);if(error)throw error;return data.signedUrl; }
