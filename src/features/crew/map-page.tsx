@@ -26,7 +26,7 @@ const osmTags = { fuel: 'fuel', charging: 'charging_station', parking: 'parking'
 type NearbyPlace = { lat: number; lng: number; label: string; color: string; category: string };
 
 export function MapPage({ loop = false, circuitId }: { loop?: boolean; circuitId?: string | undefined }) {
-  const { records, add, remove, user, sharing, setSharing, positionClock, aerial, setAerial } = useCrew();
+  const { records, add, remove, user, sharing, setSharing, positionClock, locationStatus, aerial, setAerial } = useCrew();
   const [view, setView] = useState<'locate' | 'route'>(loop || circuitId ? 'route' : 'locate');
   const locating = view === 'locate';
   const [focus, setFocus] = useState(0);
@@ -369,7 +369,11 @@ export function MapPage({ loop = false, circuitId }: { loop?: boolean; circuitId
         </div>}
         {!locating && routeError && !routeOpen && <p className="map-status" role="alert">{routeError}</p>}
         {(mode || locating && (sharing || sharedRoutes.length > 0 && category !== 'location')) && <div className="map-status">
-          {locating && sharing && <p>Position partagée avec les membres connectés.</p>}
+          {locating && sharing && <p role="status">{locationStatus === 'live' ? 'Position partagée avec les membres connectés.'
+            : locationStatus === 'denied' ? 'Autorise la localisation pour MYbike dans les réglages du navigateur.'
+            : locationStatus === 'unavailable' ? 'Localisation indisponible sur cet appareil.'
+            : locationStatus === 'retrying' ? 'Partage temporairement indisponible. Nouvelle tentative automatique.'
+            : 'Partage activé · recherche de ta position GPS…'}</p>}
           {mode && <p>{mode === 'draw' ? 'Touche la carte pour tracer ton parcours.' : mode === 'route-start' ? 'Touche la carte pour choisir le départ.' : mode === 'route-end' ? 'Touche la carte pour choisir la destination.' : mode === 'route-via' ? 'Touche les chemins pour poser tes points. Appuie à nouveau sur la punaise pour terminer.' : 'Touche la carte pour placer le repère.'}</p>}
           {locating && category !== 'location' && sharedRoutes.length > 0 && <select aria-label="Parcours partagés" value="" onChange={event => {
             const record = sharedRoutes.find(item => item.id === event.target.value);

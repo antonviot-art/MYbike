@@ -1,6 +1,5 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { toast } from 'sonner';
 import type { CrewRecord } from './data';
 
 export function livePilots(records: CrewRecord[], now: number, exclude?: string) {
@@ -20,67 +19,86 @@ export function livePilots(records: CrewRecord[], now: number, exclude?: string)
   return [...active.values()];
 }
 
-export function useLiveLocation(userId: string | undefined, name: string, enabled: boolean, stop: () => void) {
+export function useLiveLocation(userId: string | undefined, name: string, enabled: boolean) {
+  const [status, setStatus] = useState<'waiting' | 'live' | 'denied' | 'unavailable' | 'retrying'>('waiting');
   useEffect(() => {
+    setStatus('waiting');
     if (!userId || !enabled) return;
-    if (!navigator.geolocation) { stop(); return; }
+    if (!navigator.geolocation) { setStatus('unavailable'); return; }
     const authorId = userId;
     let active = true;
     let recordId: string | undefined;
     let writing = false;
-    let position: GeolocationPosition | undefined;
+    let watch: number | undefined;
+    let generation = 0;
+    const options = { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 };
 
     async function remove(id: string) {
-      const { error } = await supabase.from('group_records').delete().eq('id', id).eq('author_id', authorId);
-      if (error) toast.error('La position peut rester visible jusqu’à son expiration.');
+      await supabase.from('group_records').delete().eq('id', id).eq('author_id', authorId);
     }
 
-    async function publish() {
-      if (!active || !position || writing) return;
+    async function publish(position: GeolocationPosition, current: number) {
+      if (!active || current !== generation || document.hidden || writing || Date.now() - position.timestamp > 15000) return;
       writing = true;
       const payload = { lat: position.coords.latitude, lng: position.coords.longitude, label: name, expires: Date.now() + 45000 };
       try {
         if (recordId) {
-          const { error } = await supabase.from('group_records').update({ payload }).eq('id', recordId).eq('author_id', authorId);
+          const { data, error } = await supabase.from('group_records').update({ payload }).eq('id', recordId)
+            .eq('author_id', authorId).select('id').maybeSingle();
           if (error) throw error;
-        } else {
+          if (!data) recordId = undefined;
+        }
+        if (!recordId && active && current === generation && !document.hidden) {
           const { data, error } = await supabase.from('group_records').insert({ kind: 'live-position', payload, author_id: authorId }).select('id').single();
           if (error) throw error;
           recordId = data.id;
           if (!active) await remove(recordId);
         }
+        if (active && current === generation && recordId) setStatus('live');
       } catch {
-        if (active) {
-          toast.error('Le partage de position a échoué.');
-          stop();
-        }
+        if (active && current === generation) setStatus('retrying');
       } finally {
         writing = false;
       }
     }
 
-    const watch = navigator.geolocation.watchPosition(value => {
-      position = value;
-      void publish();
-    }, () => {
-      if (!active) return;
-      toast.error('Position indisponible. Vérifie les autorisations de localisation.');
-      stop();
-    }, { maximumAge: 5000, timeout: 15000 });
-    const heartbeat = window.setInterval(() => {
-      navigator.geolocation.getCurrentPosition(value => {
-        position = value;
-        void publish();
-      }, () => {}, { maximumAge: 5000, timeout: 10000 });
-    }, 15000);
+    function onFailure(error: GeolocationPositionError, current: number) {
+      if (active && current === generation) setStatus(error.code === 1 ? 'denied' : 'waiting');
+    }
 
+    function probe() {
+      if (document.hidden) return;
+      const current = generation;
+      navigator.geolocation.getCurrentPosition(value => { void publish(value, current); },
+        error => onFailure(error, current), options);
+    }
+
+    function resume() {
+      generation++;
+      if (watch !== undefined) navigator.geolocation.clearWatch(watch);
+      watch = undefined;
+      if (document.hidden) return;
+      setStatus('waiting');
+      const current = generation;
+      watch = navigator.geolocation.watchPosition(value => { void publish(value, current); },
+        error => onFailure(error, current), options);
+    }
+
+    resume();
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('pageshow', resume);
+    window.addEventListener('online', probe);
+    const heartbeat = window.setInterval(probe, 15000);
     return () => {
       active = false;
-      navigator.geolocation.clearWatch(watch);
+      if (watch !== undefined) navigator.geolocation.clearWatch(watch);
+      document.removeEventListener('visibilitychange', resume);
+      window.removeEventListener('pageshow', resume);
+      window.removeEventListener('online', probe);
       window.clearInterval(heartbeat);
       if (recordId) void remove(recordId);
     };
-  }, [userId, name, enabled, stop]);
+  }, [userId, name, enabled]);
 
   const [now, setNow] = useState(0);
   useEffect(() => {
@@ -89,5 +107,5 @@ export function useLiveLocation(userId: string | undefined, name: string, enable
     const timer = window.setInterval(tick, 5000);
     return () => window.clearInterval(timer);
   }, []);
-  return now;
+  return { now, status };
 }
