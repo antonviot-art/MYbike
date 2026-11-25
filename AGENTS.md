@@ -31,6 +31,6 @@ use the editor.
 
 ## Application architecture
 - Keep group features in `src/features/crew` and leaf pages in TanStack file routes; shared state belongs in CrewProvider so navigation retains demo edits.
-- Public pages show only clearly labeled fictional demo records; signed-in invited accounts read Cloud records under authenticated-only RLS, with public signup disabled.
+- Public visitors see the account entry screen. Signed-in members read Cloud records under authenticated-only RLS. Email signup is open for MYbike.
 - Load Leaflet dynamically behind ClientOnly to avoid browser-only imports during SSR; online OSM tiles do not imply offline support.
 - Store original uploaded media in private Cloud Storage and reference paths in group records; resolve signed URLs only for authenticated viewers.

@@ -1,9 +1,10 @@
-﻿import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   Outlet,
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
   HeadContent,
   Scripts,
   type ErrorComponentProps,
@@ -12,7 +13,9 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
-import { CrewProvider } from '@/features/crew/context';
+import { AccountEntry } from '@/features/crew/account-entry';
+import { WelcomeTutorial } from '@/features/crew/welcome-tutorial';
+import { CrewProvider, useCrew } from '@/features/crew/context';
 import { Toaster } from 'sonner';
 
 function NotFoundComponent() {
@@ -137,8 +140,16 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      <CrewProvider><Outlet /></CrewProvider>
+      <CrewProvider><AccountGate /></CrewProvider>
       <Toaster theme="dark" richColors />
     </QueryClientProvider>
   );
+}
+
+function AccountGate() {
+  const { user } = useCrew();
+  const pathname = useRouterState({ select: state => state.location.pathname });
+  if (pathname === '/reset-password') return <Outlet />;
+  if (!user || user.is_anonymous) return <AccountEntry preferSignIn={pathname === '/discussion'} />;
+  return <><Outlet /><WelcomeTutorial key={user.id} /></>;
 }

@@ -1,7 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Bike, CalendarDays, Flag, House, Images, LockKeyhole, Map, MessageSquare, Route as RouteIcon, Settings, UserRound } from 'lucide-react';
+import { ArrowLeft, Bike, CalendarDays, Flag, House, Images, Map, MessageSquare, Route as RouteIcon, Settings } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -43,78 +43,14 @@ export function Avatar({ pilot, size = '', userId }: { pilot: string; size?: str
   </span>;
 }
 
-export function CrewShell({ tab, immersive = false, signInOnOpen = false, children }: { tab: string; immersive?: boolean; signInOnOpen?: boolean; children: ReactNode }) {
+export function CrewShell({ tab, immersive = false, children }: { tab: string; immersive?: boolean; children: ReactNode }) {
   const { user, firstName, loading, upload } = useCrew();
   const queryClient = useQueryClient();
-  const [auth, setAuth] = useState(signInOnOpen);
-  const [register, setRegister] = useState(false);
-  const [notice, setNotice] = useState('');
   const [settings, setSettings] = useState<false | 'menu' | 'profile' | 'account'>(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
   const region = user?.user_metadata['region'];
   const needsProfile = Boolean(user && (!firstName || !frenchRegions.includes(region)));
   const settingsPage = needsProfile ? 'profile' : settings;
-
-  async function submitAuth(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setBusy(true);
-    setError('');
-    setNotice('');
-    const form = new FormData(event.currentTarget);
-    const email = String(form.get('email')).trim();
-    const password = String(form.get('password'));
-    try {
-      if (register) {
-        const givenName = String(form.get('firstName') ?? '').trim();
-        const selectedRegion = String(form.get('region') ?? '');
-        if (!givenName || !frenchRegions.includes(selectedRegion)) {
-          setError('Renseigne ton prénom et ta région.');
-          return;
-        }
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            emailRedirectTo: new URL('/', window.location.origin).href,
-            data: {
-              given_name: givenName,
-              display_name: givenName,
-              region: selectedRegion,
-              locality: String(form.get('locality') ?? '').trim(),
-            },
-          },
-        });
-        if (error) {
-          setError(error.code === 'signup_disabled' ? 'Les inscriptions sont désactivées pour le moment.' : error.message);
-          return;
-        }
-        if (!data.session) {
-          setRegister(false);
-          setNotice('Si un lien de confirmation a été envoyé, ouvre-le, puis connecte-toi. Pense à vérifier tes indésirables.');
-          return;
-        }
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) {
-          setError(error.code === 'email_not_confirmed' ? 'Confirme ton adresse avec le lien reçu par e-mail.' : 'Connexion impossible. Vérifie ton adresse e-mail et ton mot de passe.');
-          return;
-        }
-      }
-      setAuth(false);
-    } catch {
-      setError('Le service est momentanément indisponible. Réessaie.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function selectAuthMode(signUp: boolean) {
-    setRegister(signUp);
-    setError('');
-    setNotice('');
-    setAuth(true);
-  }
 
   async function saveFirstName(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -178,21 +114,13 @@ export function CrewShell({ tab, immersive = false, signInOnOpen = false, childr
             <span className="brand">MY<span className="text-primary">bike</span></span>
           </Link>
           <div className="flex items-center gap-1 sm:gap-3">
-            {!user && <span className="hidden text-xs text-muted-foreground md:inline">Version démo</span>}
-            {user ? (
-              <>
-                <Friends key={user.id} />
-                <Button variant="ghost" className="gap-1 px-1 sm:px-2" onClick={() => setSettings('menu')} aria-label="Paramètres" title="Paramètres">
-                  {firstName && <Avatar pilot={firstName.charAt(0).toUpperCase()} userId={user.id} />}
-                  <Settings />
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button className="px-2 sm:px-4" variant="ghost" onClick={() => selectAuthMode(false)}><UserRound className="hidden sm:block" /> Connexion</Button>
-                <Button className="px-2 sm:px-4" onClick={() => selectAuthMode(true)}>Créer un compte</Button>
-              </>
-            )}
+            {user && <>
+              <Friends key={user.id} />
+              <Button variant="ghost" className="gap-1 px-1 sm:px-2" onClick={() => setSettings('menu')} aria-label="Paramètres" title="Paramètres">
+                {firstName && <Avatar pilot={firstName.charAt(0).toUpperCase()} userId={user.id} />}
+                <Settings />
+              </Button>
+            </>}
           </div>
         </div>
       </header>}
@@ -200,11 +128,6 @@ export function CrewShell({ tab, immersive = false, signInOnOpen = false, childr
         {!immersive && tab !== 'Accueil' && tab !== 'Plan' && <h1 className="page-title mb-6">{tab}</h1>}
         {!immersive && loading && tab !== 'Plan' && <p role="status" className="mb-3 text-sm text-muted-foreground">Synchronisation…</p>}
         {immersive ? children : <div className="page-enter">{children}</div>}
-        {!immersive && !user && tab !== 'Plan' && (
-          <footer className="app-footer flex items-center gap-2">
-            <LockKeyhole size={13} /> Données fictives · modifications temporaires
-          </footer>
-        )}
       </main>
       {!immersive && <nav className="app-nav" aria-label="Navigation principale">
         <div className="app-nav-links">
@@ -216,33 +139,6 @@ export function CrewShell({ tab, immersive = false, signInOnOpen = false, childr
           ))}
         </div>
       </nav>}
-      <Dialog open={auth && !user} onOpenChange={setAuth}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto">
-          <DialogTitle className="font-display text-3xl">{register ? 'Créer ton compte MYbike' : 'Connexion à MYbike'}</DialogTitle>
-          <DialogDescription>{register ? 'Inscris-toi avec ton adresse e-mail.' : 'Connecte-toi avec ton e-mail et ton mot de passe.'}</DialogDescription>
-          <form key={String(register)} onSubmit={submitAuth} className="grid gap-4">
-            {register && <>
-              <label className="grid gap-2 text-sm">Prénom<input name="firstName" required maxLength={80} autoComplete="given-name" /></label>
-              <label className="grid gap-2 text-sm">Région
-                <select name="region" required defaultValue="">
-                  <option value="">Choisis ta région</option>
-                  {frenchRegions.map(item => <option key={item}>{item}</option>)}
-                </select>
-              </label>
-              <label className="grid gap-2 text-sm">Ville ou département (facultatif)<input name="locality" maxLength={100} /></label>
-            </>}
-            <label className="grid gap-2 text-sm">Adresse e-mail<input name="email" type="email" required autoComplete="email" /></label>
-            <label className="grid gap-2 text-sm">Mot de passe<input name="password" type="password" required minLength={register ? 8 : undefined} autoComplete={register ? 'new-password' : 'current-password'} /></label>
-            {error && <p role="alert" className="text-primary text-sm">{error}</p>}
-            {notice && <p role="status" className="text-sm">{notice}</p>}
-            <Button disabled={busy}>{busy ? 'Un instant…' : register ? 'Créer mon compte' : 'Se connecter'}</Button>
-          </form>
-          <Button variant="ghost" disabled={busy} onClick={() => selectAuthMode(!register)}>
-            {register ? 'J’ai déjà un compte' : 'Créer un compte'}
-          </Button>
-          {!register && <Button variant="ghost" onClick={() => void resetPassword()}>Mot de passe oublié ?</Button>}
-        </DialogContent>
-      </Dialog>
       <Dialog open={Boolean(user && settingsPage)} onOpenChange={open => { if (!open) setSettings(false); }}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto" hideCloseButton={needsProfile} onEscapeKeyDown={event => { if (needsProfile) event.preventDefault(); }} onInteractOutside={event => { if (needsProfile) event.preventDefault(); }}>
           {settingsPage !== 'menu' && !needsProfile && <Button size="icon" variant="ghost" aria-label="Retour aux paramètres" onClick={() => setSettings('menu')}><ArrowLeft /></Button>}

@@ -188,7 +188,7 @@ export function ChatPage({ invite }: { invite?: string | undefined }) {
   }
 
   return (
-    <CrewShell tab="Discussion" immersive={Boolean(current)} signInOnOpen={Boolean(invite)}>
+    <CrewShell tab="Discussion" immersive={Boolean(current)}>
       {current ? <Conversation key={current.id} room={current} onBack={() => setSelected('')} onPhoto={() => setMenu('photo')} /> : (
         <div className="grid max-w-2xl gap-4">
           <Button size="sm" variant="outline" className="justify-self-start rounded-full" onClick={() => setMenu('group')}>

@@ -373,3 +373,6 @@ input:focus, textarea:focus { outline: 1px solid var(--primary); }
 .circuit-dashboard-readout { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 10px; }
 .circuit-mini-map { width: clamp(120px, 36vw, 300px); overflow: hidden; border-radius: 12px; }
 .circuit-mini-map .track-map { height: clamp(112px, 21dvh, 210px); }
+
+.account-entry { min-height: 100dvh; display: grid; place-items: center; padding: 24px; background: radial-gradient(ellipse at top right, color-mix(in srgb, var(--primary) 16%, var(--background)), var(--background) 60%); }
+.account-entry-panel { width: min(100%, 440px); display: grid; gap: 12px; padding: clamp(18px, 5vw, 30px); border: 1px solid var(--border); border-radius: 20px; background: var(--card); box-shadow: 0 20px 60px var(--overlay); }
