@@ -9,9 +9,15 @@ import { useCrew } from './context';
 import { metersBetween, readSegments, trackDistance, type TrackPoint } from './tracks';
 import type { CrewRecord } from './data';
 import { useTrackRecorder } from './use-track-recorder';
+import { calculateGpxLaps, type LapSample, type LapTrace } from './circuit-gpx';
+import { GpxImport } from './gpx-import';
 
 export function readLapTimes(value: unknown) {
   return Array.isArray(value) ? value.filter((time): time is number => typeof time === 'number' && Number.isFinite(time) && time > 0) : [];
+}
+
+export function readPocketSessions(value: unknown): CrewRecord['payload'][] {
+  return Array.isArray(value) ? value.filter(item => item && typeof item === 'object' && readLapTimes(item.laps).length) : [];
 }
 
 export function formatLap(time: number) {
@@ -34,8 +40,6 @@ export function LapResults({ value }: { value: unknown }) {
 type HeatMode = 'free' | 'laps' | 'time' | 'time-laps';
 type Heat = { mode: HeatMode; seconds: number; laps: number; name: string };
 
-type LapSample = [number, number, number];
-type LapTrace = LapSample[];
 
 function readLapTrace(value: unknown): LapTrace {
   if (!Array.isArray(value)) return [];
@@ -94,8 +98,8 @@ function formatLapDelta(milliseconds: number) {
   return seconds === 0 ? 'Même temps' : seconds.toLocaleString('fr-FR', { maximumFractionDigits: 1 }) + ' s ' + (milliseconds < 0 ? 'plus rapide' : 'plus lent');
 }
 
-export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boolean; onActive?: (active: boolean) => void; circuit?: CrewRecord }) {
-  const { add, user, name, records } = useCrew();
+export function CircuitRecorder({ blocked, onActive, onExit, circuit }: { blocked: boolean; onActive?: (active: boolean) => void; onExit?: () => void; circuit?: CrewRecord }) {
+  const { add, update, user, name, records } = useCrew();
   const circuitPoints = readSegments(circuit?.payload['segments'])[0];
   const checkpoints = circuitPoints ? [0.25, 0.5, 0.75].flatMap(fraction => {
     const point = circuitPoints[Math.floor((circuitPoints.length - 1) * fraction)];
@@ -126,6 +130,8 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
   const [remaining, setRemaining] = useState<number>();
   const [laps, setLaps] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
+  const [pocket, setPocket] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [dashboard, setDashboard] = useState(false);
   const [showMap, setShowMap] = useState(true);
   const [clock, setClock] = useState(0);
@@ -242,6 +248,32 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
     }, 150);
   }
 
+  function exitSession() {
+    if ((active || laps.length > 0) && !window.confirm('Annuler cette session ? Les chronos non enregistrés seront effacés.')) return;
+    window.clearInterval(timer.current);
+    draft.clear();
+    gate.current = undefined;
+    setRemaining(undefined);
+    setLaps([]);
+    setLapTraces([]);
+    setCompleted(false);
+    setNotes('');
+    setSurface('');
+    setDashboard(false);
+    setPocket(false);
+    onExit?.();
+  }
+
+  function importSession(text: string) {
+    if (!circuitPoints) return;
+    const result = calculateGpxLaps(text, circuitPoints);
+    heat.current = { mode: 'free', seconds: 0, laps: 0, name: '' };
+    sessionVehicle.current = { id: vehicle?.id ?? '', name: vehicleName };
+    setCompleted(false);
+    setLapTraces(result.lapTraces);
+    setLaps(result.laps);
+  }
+
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!laps.length || active || saving) return;
@@ -253,7 +285,12 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
     try {
       if (circuit) {
         if (!user) throw new Error('Connecte-toi pour publier tes chronos.');
-        await add('circuit-lap', { circuitId: circuit.id, laps, pilot: name, ...metadata });
+        if (circuit.payload['visibility'] === 'private' && circuit.author_id === user.id) {
+          const sessions = readPocketSessions(circuit.payload['pocketSessions']);
+          await update(circuit.id, { ...circuit.payload, pocketSessions: [...sessions, { laps, ...metadata }] });
+        } else {
+          await add('circuit-lap', { circuitId: circuit.id, laps, pilot: name, ...metadata });
+        }
       } else {
         const visibility = form.get('visibility') === 'public' && user ? 'public' : 'private';
         const segments = gate.current ? [gate.current.firstLap] : draft.segments;
@@ -266,7 +303,7 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
       setCompleted(false);
       setNotes('');
       setSurface('');
-      toast.success(circuit ? 'Chronos ajoutés au classement.' : 'Boucle et chronos enregistrés dans Mes parcours.');
+      toast.success(circuit ? 'Chronos enregistrés.' : 'Boucle et chronos enregistrés dans Mes parcours.');
     } catch { toast.error('Impossible d’enregistrer la boucle.'); }
     finally { setSaving(false); }
   }
@@ -281,9 +318,19 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
       <Button variant="outline" onClick={() => { window.clearInterval(timer.current); setRemaining(undefined); }}>Annuler</Button>
     </div> : draft.recording ? <div className="grid gap-2">
       <p role="status">{gate.current ? 'Chrono actif · ' + laps.length + ' tour(s)' : (circuit ? 'Approche de la ligne de départ avec un signal GPS précis…' : 'Attente d’un signal GPS précis…')}</p>
-      <Button className="justify-self-start" onClick={draft.stop}><Flag /> Terminer la session</Button>
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={draft.stop}><Flag /> Terminer la session</Button>
+        <Button variant="outline" onClick={exitSession}>Annuler la session</Button>
+      </div>
     </div> : <div className="flex flex-wrap items-end gap-2">
       {vehicles.length > 0 && <label className="grid gap-1 text-sm">Moto du chrono<select value={vehicleId} disabled={laps.length > 0} onChange={event => setVehicleId(event.currentTarget.value)}><option value="">Moto non renseignée</option>{vehicles.map(item => <option key={item.id} value={item.id}>{String(item.payload['name'] ?? 'Moto')}</option>)}</select></label>}
+      {circuitPoints && <Button variant="outline" aria-pressed={pocket} disabled={importing || saving || laps.length > 0} onClick={() => setPocket(!pocket)}>{pocket ? 'Chrono en direct' : 'Mode poche'}</Button>}
+      {pocket ? <div className="grid w-full gap-2 text-sm">
+        <p>Démarre une trace dans Open GPX Tracker avant la ligne, puis verrouille ton iPhone. Après ton dernier tour, exporte le GPX et importe-le ici pour calculer tes chronos.</p>
+        <a href="https://apps.apple.com/fr/app/open-gpx-tracker/id984503772" target="_blank" rel="noreferrer" className="justify-self-start underline">Open GPX Tracker sur l’App Store</a>
+        <GpxImport label="Importer les chronos depuis un GPX" disabled={blocked || saving || laps.length > 0} reading={importing} onReading={setImporting} onImport={importSession} />
+        {laps.length > 0 && <Button variant="outline" className="justify-self-start" disabled={saving} onClick={() => { setLaps([]); setLapTraces([]); }}>Annuler l’import</Button>}
+      </div> : <>
       <label className="grid gap-1 text-sm">Format de session<select value={heatMode} onChange={event => setHeatMode(event.currentTarget.value as HeatMode)}>
         <option value="free">Chrono libre</option><option value="laps">Nombre de tours</option><option value="time">Durée fixe</option><option value="time-laps">Durée + tours</option>
       </select></label>
@@ -294,6 +341,7 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
         <option value={0}>Départ immédiat</option><option value={5}>5 secondes</option><option value={10}>10 secondes</option><option value={30}>30 secondes</option><option value={60}>1 minute</option><option value={120}>2 minutes</option><option value={300}>5 minutes</option>
       </select></label>
       <Button disabled={blocked || saving} onClick={arm}><Timer /> Démarrer le chrono</Button>
+      </>}
     </div>;
   const personalHistory = circuit && user ? records.flatMap(record => record.kind === 'circuit-lap' && record.author_id === user.id && record.payload['circuitId'] === circuit.id && String(record.payload['vehicleId'] ?? '') === (laps.length || active ? sessionVehicle.current.id : vehicleId)
     ? readLapTimes(record.payload['laps']) : []) : [];
@@ -305,7 +353,10 @@ export function CircuitRecorder({ blocked, onActive, circuit }: { blocked: boole
   const currentLap = draft.recording && gate.current && clock > 0 ? Math.max(0, clock - gate.current.lastCrossing) : undefined;
 
   return <section className="ride-record grid gap-4">
-    <h2 className="text-xl font-semibold">Boucle chronométrée</h2>
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <h2 className="text-xl font-semibold">Boucle chronométrée</h2>
+      <Button variant="ghost" disabled={saving || importing} onClick={exitSession}><X /> Quitter la boucle</Button>
+    </div>
     <p className="text-sm text-muted-foreground">Place-toi près de la ligne de départ. Le GPS détecte le retour pour chronométrer tes tours.</p>
     <p className="text-sm text-muted-foreground">Garde MYbike au premier plan. Le suivi et la vibration peuvent s’interrompre si le téléphone se verrouille.</p>
     {blocked && <p className="text-sm">Arrête ton enregistrement en cours pour lancer le chrono.</p>}

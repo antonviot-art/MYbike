@@ -3,10 +3,12 @@ import { ClientOnly, Link } from '@tanstack/react-router';
 import { Bookmark, Circle, Gauge, MapPin, Maximize, Route, Share2, Square, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { useCrew } from './context';
 import { CrewShell } from './shell';
 import { kilometers, readSegments, type TrackPoint, type TrackStop } from './tracks';
 import { CircuitRecorder, LapResults } from './circuit-recorder';
+import { GpxImport } from './gpx-import';
 import { useTrackRecorder } from './use-track-recorder';
 import { useInitialPosition, type InitialPosition } from './use-initial-position';
 import { socialCall } from './social';
@@ -216,10 +218,12 @@ function RideRecorder() {
   const [discard, setDiscard] = useState(false);
   const [dashboard, setDashboard] = useState(false);
   const [pocket, setPocket] = useState(false);
+  const [pocketPrompt, setPocketPrompt] = useState(false);
   const [focusPilots, setFocusPilots] = useState(false);
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayout>('balanced');
   const [addingStop, setAddingStop] = useState(false);
   const [tab, setTab] = useState<'mine' | 'explore' | 'saved' | 'record' | 'loop'>('mine');
+  const [importingGpx, setImportingGpx] = useState(false);
   const browseMode = tab === 'mine' || tab === 'explore' || tab === 'saved';
   const [terrain, setTerrain] = useState('');
   const [difficultyFilter, setDifficultyFilter] = useState('');
@@ -228,6 +232,10 @@ function RideRecorder() {
   const vehicles = records.filter(record => record.kind === 'vehicle' && (user ? record.author_id === user.id : !record.author_id));
   const vehicle = vehicles.find(record => record.id === vehicleId);
   const canSave = draft.segments.some(segment => segment.length > 1);
+  function importPocketRide(text: string) {
+    draft.importGpx(text);
+    toast.success('Trace importée. Donne un nom à ton parcours pour l’enregistrer.');
+  }
   const rides = records.filter(record => record.kind === 'ride-track').slice().reverse();
   const myRides = rides.filter(ride => user ? ride.author_id === user.id : /^[0-9a-f-]{36}$/i.test(ride.id));
   const query = place.trim().toLocaleLowerCase('fr');
@@ -310,14 +318,21 @@ function RideRecorder() {
         </>}
       </div>
     </nav>
-    {pocket && draft.recording && <section className="fixed inset-0 z-50 grid place-items-center bg-black p-6 text-center text-white" aria-label="Mode poche">
-      <div className="grid max-w-xs gap-4">
-        <h2 className="text-lg font-semibold text-white/70">Mode poche</h2>
-        <p className="text-sm text-white/60">Garde MYbike ouvert, écran allumé. Si ton téléphone se met en veille tout seul, règle la mise en veille automatique avant de partir.</p>
-        <Button variant="secondary" onClick={() => setPocket(false)}>Quitter le mode poche</Button>
-      </div>
-    </section>}
-    {dashboard && <section className="ride-dashboard" data-layout={dashboardLayout} aria-label="Tableau de bord du parcours" onKeyDown={event => { if (event.key === 'Escape') setDashboard(false); }}>
+    <Dialog open={pocketPrompt && draft.recording} onOpenChange={setPocketPrompt}>
+      <DialogContent>
+        <DialogTitle>Mode poche</DialogTitle>
+        <DialogDescription>L’écran devient noir et MYbike continue d’enregistrer. Baisse la luminosité avant de continuer et garde le téléphone déverrouillé.</DialogDescription>
+        <Button onClick={() => { setPocketPrompt(false); setPocket(true); }}>Continuer vers le mode poche</Button>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={pocket && draft.recording} onOpenChange={setPocket}>
+      <DialogContent fullscreen hideCloseButton className="!bg-black">
+        <DialogTitle className="sr-only">Mode poche</DialogTitle>
+        <DialogDescription className="sr-only">Ton parcours continue à s’enregistrer.</DialogDescription>
+        <button type="button" className="absolute inset-x-0 bottom-0 mx-auto w-fit px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-xs text-zinc-500" onClick={() => setPocket(false)}>Quitter le mode poche</button>
+      </DialogContent>
+    </Dialog>
+    {dashboard && !pocket && <section className="ride-dashboard" data-layout={dashboardLayout} aria-label="Tableau de bord du parcours" onKeyDown={event => { if (event.key === 'Escape') setDashboard(false); }}>
       <div className="ride-dashboard-stats">
         <div className="flex w-full flex-wrap items-center justify-between gap-2">
           <Button size="icon" variant="outline" autoFocus aria-label="Fermer le tableau de bord" onClick={() => setDashboard(false)}><X /></Button>
@@ -346,12 +361,12 @@ function RideRecorder() {
           {vehicles.map(item => <option value={item.id} key={item.id}>{String(item.payload['name'] ?? 'Moto')}</option>)}
         </select>
       </label>}
-      {!dashboard && <TrackMap segments={draft.segments} position={draft.position} initialPosition={initialPosition} stops={draft.stops} pilots={pilots} focusPilots={focusPilots && pilots.length > 0} />}
+      {!dashboard && !pocket && <TrackMap segments={draft.segments} position={draft.position} initialPosition={initialPosition} stops={draft.stops} pilots={pilots} focusPilots={focusPilots && pilots.length > 0} />}
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <strong>{kilometers(draft.distance)}</strong><span>{duration}</span>
         {draft.recording && <span role="status">{draft.accuracy === undefined ? 'Recherche du signal GPS…' : draft.accuracy > 35 ? 'Signal GPS faible · en attente d’un meilleur point' : 'Précision GPS ± ' + draft.accuracy + ' m'}</span>}
       </div>
-      {draft.recording && !dashboard && dial}
+      {draft.recording && !dashboard && !pocket && dial}
       {draft.recording && user && <div className="flex flex-wrap items-center gap-3">
         <span className="text-sm text-muted-foreground">{pilotCount}</span>
         {pilotFocusButton}
@@ -361,14 +376,22 @@ function RideRecorder() {
       <div className="flex flex-wrap gap-2">
         {draft.recording
           ? <Button onClick={() => { draft.stop(); setPocket(false); }}><Square /> Arrêter</Button>
-          : <Button onClick={draft.start} disabled={saving || circuitActive}><Circle /> {draft.segments.length ? 'Reprendre' : 'Démarrer'}</Button>}
+          : <Button onClick={draft.start} disabled={saving || circuitActive || importingGpx}><Circle /> {draft.segments.length ? 'Reprendre' : 'Démarrer'}</Button>}
         {draft.recording && <Button variant="outline" onClick={() => setDashboard(true)}><Maximize /> Tableau de bord</Button>}
-        {draft.recording && <Button variant="outline" onClick={() => setPocket(true)}>Mode poche</Button>}
+        {draft.recording && <Button variant="outline" onClick={() => setPocketPrompt(true)}>Mode poche</Button>}
         {draft.recording && <Button variant="outline" disabled={!draft.position || draft.position.accuracy > 35} onClick={() => setAddingStop(!addingStop)}><MapPin /> Ajouter un repère</Button>}
         {!draft.recording && draft.segments.length > 0 && <Button variant="ghost" disabled={saving} onClick={() => {
           if (discard) { draft.clear(); setDiscard(false); } else setDiscard(true);
         }}>{discard ? 'Confirmer la suppression' : 'Effacer le brouillon'}</Button>}
       </div>
+      {!draft.recording && !draft.segments.length && <details className="rounded-xl border p-3">
+        <summary className="cursor-pointer font-medium">Enregistrer avec l’iPhone verrouillé</summary>
+        <div className="mt-3 grid gap-2 text-sm">
+          <p>Démarre dans Open GPX Tracker et attends que ta position apparaisse, puis verrouille l’iPhone. À l’arrivée, arrête l’enregistrement et importe le fichier GPX ici.</p>
+          <a href="https://apps.apple.com/fr/app/open-gpx-tracker/id984503772" target="_blank" rel="noreferrer" className="justify-self-start underline">Open GPX Tracker sur l’App Store</a>
+          <GpxImport label="Importer le GPX de la sortie" disabled={circuitActive} reading={importingGpx} onReading={setImportingGpx} onImport={importPocketRide} />
+        </div>
+      </details>}
       {draft.recording && addingStop && <form className="flex flex-wrap gap-2" onSubmit={event => {
         event.preventDefault();
         const label = String(new FormData(event.currentTarget).get('label') ?? '');
@@ -392,7 +415,7 @@ function RideRecorder() {
       </form>}
       {!draft.recording && draft.segments.length > 0 && !canSave && <p className="text-sm text-muted-foreground">Reprends l’enregistrement et avance à l’extérieur pour obtenir une trace partageable.</p>}
     </section>
-    <div hidden={tab !== 'loop' && !circuitActive}><CircuitRecorder blocked={draft.recording} onActive={setCircuitActive} /></div>
+    <div hidden={tab !== 'loop' && !circuitActive}><CircuitRecorder blocked={draft.recording || importingGpx} onActive={setCircuitActive} onExit={() => setTab('record')} /></div>
     {tab === 'mine' ? <section className="grid gap-3">
       <h2 className="text-xl font-semibold">Mes parcours</h2>
       <TrackList records={myRides} />

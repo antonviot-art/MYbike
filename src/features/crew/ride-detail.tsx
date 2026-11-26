@@ -11,7 +11,7 @@ import { createRideSpeed } from './ride-speed';
 import type { RouteManeuver, SuggestedRide } from './valhalla.server';
 import type { livePilots } from './live-location';
 import { metersBetween, routeProgress, readSegments, readStops, type TrackPoint } from './tracks';
-import { CircuitRecorder, formatLap, LapComparison, LapResults, readLapTimes } from './circuit-recorder';
+import { CircuitRecorder, formatLap, LapComparison, LapResults, readLapTimes, readPocketSessions } from './circuit-recorder';
 import type { CrewRecord } from './data';
 
 export function RideDetailPage({ rideId, start = false }: { rideId: string; start?: boolean }) {
@@ -172,7 +172,9 @@ export function RideDetail({ ride, photos, start, convoy }: {
     if (publishingCircuit || alreadyPublished || !user || user.id !== ride.author_id) return;
     setPublishingCircuit(true);
     try {
-      await add('ride-track', { ...payload, visibility: 'public', circuit: true, publishedFromCircuit: ride.id });
+      const publicPayload = { ...payload };
+      delete publicPayload['pocketSessions'];
+      await add('ride-track', { ...publicPayload, visibility: 'public', circuit: true, publishedFromCircuit: ride.id });
       setPublishedCopy(true);
       toast.success('Boucle publiée dans Plan → Localiser.');
     } catch { toast.error('La boucle n’a pas pu être publiée.'); }
@@ -217,6 +219,11 @@ export function RideDetail({ ride, photos, start, convoy }: {
       <h3 className="text-lg font-semibold">{payload['planned'] === true ? 'Trajet prévu' : 'Bilan de sortie'}</h3>
       {isCircuit && !publicCircuit && <CircuitSession payload={payload} />}
       {isCircuit && !publicCircuit && user?.id === ride.author_id && user && <Button className="justify-self-start" disabled={publishingCircuit || alreadyPublished} onClick={() => void publishCircuit()}>{alreadyPublished ? 'Boucle publiée' : 'Publier la boucle'}</Button>}
+      {isCircuit && payload['visibility'] === 'private' && user && user.id === ride.author_id && <>
+        <Button variant="outline" className="justify-self-start" aria-expanded={racing} onClick={() => setRacing(!racing)}><Flag />{racing ? 'Masquer le chrono' : 'Faire la boucle'}</Button>
+        <div hidden={!racing}><CircuitRecorder blocked={following} circuit={ride} onExit={() => setRacing(false)} /></div>
+        {readPocketSessions(payload['pocketSessions']).map((session, index) => <CircuitSession key={index} payload={session} />)}
+      </>}
       <RideStats distance={Number(payload['distance']) || 0} duration={Number(payload['duration']) || 0} motion={motionStats} maxSpeed={maxSpeed} />
     </section>
     {publicCircuit && <section className="ride-record grid gap-4">
@@ -230,7 +237,7 @@ export function RideDetail({ ride, photos, start, convoy }: {
           <div className="mt-2 grid gap-3">{pilot.sessions.map(session => <CircuitSession key={session.id} payload={session.payload} />)}</div>
         </details>
       </li>)}</ol> : <p className="text-sm text-muted-foreground">Aucun chrono publié.</p>}
-      <div hidden={!racing}><CircuitRecorder blocked={following} circuit={ride} /></div>
+      <div hidden={!racing}><CircuitRecorder blocked={following} circuit={ride} onExit={() => setRacing(false)} /></div>
     </section>}
     <section className="ride-record grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">

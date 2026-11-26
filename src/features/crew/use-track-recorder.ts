@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { metersBetween, readSegments, readStops, trackDistance, type TrackPoint, type TrackStop } from './tracks';
 import { createRideSpeed, type SpeedReading } from './ride-speed';
+import { readGpxTrack } from './gpx-track';
 
 const maxPoints = 12000;
 
@@ -213,5 +214,18 @@ export function useTrackRecorder(key: string, onGoodFix?: (point: TrackPoint, ti
     return true;
   }
 
-  return { segments, distance: trackDistance(segments), duration, recording, accuracy, speed: speedReading?.kmh, maxSpeed, speedSource: speedReading?.source, position, motion, stops, addStop, start, stop, clear };
+  function importGpx(text: string) {
+    if (control.current || data.current.some(segment => segment.length)) {
+      throw new Error('Enregistre ou efface ton brouillon avant d’importer un parcours.');
+    }
+    const imported = readGpxTrack(text, maxPoints);
+    clear();
+    data.current = imported.segments;
+    durationRef.current = imported.duration;
+    setSegments(imported.segments);
+    setDuration(imported.duration);
+    persist();
+  }
+
+  return { segments, distance: trackDistance(segments), duration, recording, accuracy, speed: speedReading?.kmh, maxSpeed, speedSource: speedReading?.source, position, motion, stops, addStop, start, stop, clear, importGpx };
 }
