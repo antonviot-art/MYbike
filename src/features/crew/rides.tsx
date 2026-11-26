@@ -415,7 +415,7 @@ function RideRecorder() {
       </form>}
       {!draft.recording && draft.segments.length > 0 && !canSave && <p className="text-sm text-muted-foreground">Reprends l’enregistrement et avance à l’extérieur pour obtenir une trace partageable.</p>}
     </section>
-    <div hidden={tab !== 'loop' && !circuitActive}><CircuitRecorder blocked={draft.recording || importingGpx} onActive={setCircuitActive} onExit={() => setTab('record')} /></div>
+    <div hidden={tab !== 'loop' && !circuitActive}><CircuitRecorder blocked={draft.recording || importingGpx} onActive={setCircuitActive} onExit={() => setTab('record')} onCreated={() => setTab('mine')} /></div>
     {tab === 'mine' ? <section className="grid gap-3">
       <h2 className="text-xl font-semibold">Mes parcours</h2>
       <TrackList records={myRides} />
