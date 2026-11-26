@@ -215,6 +215,7 @@ function RideRecorder() {
   const [circuitActive, setCircuitActive] = useState(false);
   const [discard, setDiscard] = useState(false);
   const [dashboard, setDashboard] = useState(false);
+  const [pocket, setPocket] = useState(false);
   const [focusPilots, setFocusPilots] = useState(false);
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayout>('balanced');
   const [addingStop, setAddingStop] = useState(false);
@@ -309,6 +310,13 @@ function RideRecorder() {
         </>}
       </div>
     </nav>
+    {pocket && draft.recording && <section className="fixed inset-0 z-50 grid place-items-center bg-black p-6 text-center text-white" aria-label="Mode poche">
+      <div className="grid max-w-xs gap-4">
+        <h2 className="text-lg font-semibold text-white/70">Mode poche</h2>
+        <p className="text-sm text-white/60">Garde MYbike ouvert, écran allumé. Si ton téléphone se met en veille tout seul, règle la mise en veille automatique avant de partir.</p>
+        <Button variant="secondary" onClick={() => setPocket(false)}>Quitter le mode poche</Button>
+      </div>
+    </section>}
     {dashboard && <section className="ride-dashboard" data-layout={dashboardLayout} aria-label="Tableau de bord du parcours" onKeyDown={event => { if (event.key === 'Escape') setDashboard(false); }}>
       <div className="ride-dashboard-stats">
         <div className="flex w-full flex-wrap items-center justify-between gap-2">
@@ -352,9 +360,10 @@ function RideRecorder() {
       <p className="text-sm text-muted-foreground">Garde cet écran ouvert pendant l’enregistrement. La trace reste sur cet appareil jusqu’au partage.</p>
       <div className="flex flex-wrap gap-2">
         {draft.recording
-          ? <Button onClick={draft.stop}><Square /> Arrêter</Button>
+          ? <Button onClick={() => { draft.stop(); setPocket(false); }}><Square /> Arrêter</Button>
           : <Button onClick={draft.start} disabled={saving || circuitActive}><Circle /> {draft.segments.length ? 'Reprendre' : 'Démarrer'}</Button>}
         {draft.recording && <Button variant="outline" onClick={() => setDashboard(true)}><Maximize /> Tableau de bord</Button>}
+        {draft.recording && <Button variant="outline" onClick={() => setPocket(true)}>Mode poche</Button>}
         {draft.recording && <Button variant="outline" disabled={!draft.position || draft.position.accuracy > 35} onClick={() => setAddingStop(!addingStop)}><MapPin /> Ajouter un repère</Button>}
         {!draft.recording && draft.segments.length > 0 && <Button variant="ghost" disabled={saving} onClick={() => {
           if (discard) { draft.clear(); setDiscard(false); } else setDiscard(true);

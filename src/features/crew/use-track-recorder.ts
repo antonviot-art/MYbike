@@ -84,9 +84,9 @@ export function useTrackRecorder(key: string, onGoodFix?: (point: TrackPoint, ti
       } catch { /* The device controls screen wake availability. */ }
     }
     void keepScreenOn();
-    document.addEventListener('visibilitychange', keepScreenOn);
+    document.addEventListener('visibilitychange', onVisibility);
 
-    const watch = navigator.geolocation.watchPosition(({ coords, timestamp }) => {
+    const onPosition: PositionCallback = ({ coords, timestamp }) => {
       if (!active || !Number.isFinite(timestamp) || timestamp <= lastFix) return;
       lastFix = timestamp;
       const point: TrackPoint = [coords.latitude, coords.longitude];
@@ -136,12 +136,28 @@ export function useTrackRecorder(key: string, onGoodFix?: (point: TrackPoint, ti
         stop();
         toast.info('La trace a atteint sa limite. Enregistre ce parcours avant de repartir.');
       }
-    }, error => {
+};
+    const onFailure: PositionErrorCallback = error => {
       if (error.code === 1 && active) {
         stop();
         toast.error('Autorise la localisation pour enregistrer ton parcours.');
       }
-    }, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+    };
+    const watchPosition = () => navigator.geolocation.watchPosition(onPosition, onFailure, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+    let watch = watchPosition();
+    function onVisibility() {
+      if (!active) return;
+      if (document.hidden) {
+        persist();
+        lastPoint = undefined;
+        previousMotion = undefined;
+        return;
+      }
+      void keepScreenOn();
+      navigator.geolocation.clearWatch(watch);
+      watch = watchPosition();
+    }
+    window.addEventListener('pageshow', onVisibility);
 
     const timer = window.setInterval(() => {
       setDuration(durationRef.current + Date.now() - started.current);
@@ -155,7 +171,8 @@ export function useTrackRecorder(key: string, onGoodFix?: (point: TrackPoint, ti
       window.clearInterval(timer);
       window.clearTimeout(speedTimeout);
       window.removeEventListener('pagehide', checkpoint);
-      document.removeEventListener('visibilitychange', keepScreenOn);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pageshow', onVisibility);
       void wake?.release().catch(() => {});
       durationRef.current += Date.now() - started.current;
       started.current = 0;
